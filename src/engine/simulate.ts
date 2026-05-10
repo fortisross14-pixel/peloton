@@ -192,9 +192,12 @@ export function simulateStage(input: SimulateStageInput): StageResult {
     const jitter = stage.type === 'flat' ? Math.abs(gaussian(rng)) * 0.5 : Math.abs(gaussian(rng)) * 0.3;
     let gapSeconds = Math.max(0, gap + jitter);
 
-    // On flat stages, lump the peloton: anyone within 6s of winner gets s.t.
+    // On flat stages, lump the peloton: anyone within 6s of winner gets the
+    // same time. We still need each rider to have a unique time so GC sorting
+    // preserves the stage finish order — give them a sub-second tiebreaker
+    // based on position (0.001s per place). The UI shows gaps < 1s as "s.t."
     if (stage.type === 'flat' && gapSeconds < 6) {
-      gapSeconds = i === 0 ? 0 : 0; // group sprint — but keep order distinct
+      gapSeconds = i * 0.001;
     }
 
     return {
