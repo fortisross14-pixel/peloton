@@ -1,0 +1,399 @@
+import type {
+  Rarity,
+  Skills,
+  SkillKey,
+  Rider,
+  Director,
+  Team,
+  Universe,
+  CareerPhase,
+} from '../types';
+import { RARITY_WEIGHTS, SKILL_KEYS } from '../types';
+import {
+  makeRng,
+  randInt,
+  randFloat,
+  pick,
+  weightedPick,
+  shuffle,
+  type Rng,
+} from '../utils/random';
+import {
+  NATIONALITIES,
+  FIRST_NAMES_BY_NATION,
+  LAST_NAMES_BY_NATION,
+  TEAM_NAME_POOLS,
+  DIRECTOR_LASTNAMES,
+} from './names';
+import { buildBaseCalendar } from './calendar';
+import { TEAM_TEMPLATES, type TeamTemplate } from './teams';
+
+// ============================================================================
+// RIDER GENERATION
+// ============================================================================
+
+function rollSkillsForRarity(rng: Rng, rarity: Rarity): Skills {
+  // Returns 7 base skills. Leadership rolled separately.
+  const skills: Partial<Skills> = {};
+  const allKeys = [...SKILL_KEYS];
+
+  if (rarity === 'legend') {
+    // All skills 88-99 (kept slightly broader than spec for variance)
+    for (const k of allKeys) skills[k] = randInt(rng, 88, 99);
+  } else if (rarity === 'epic') {
+    // 1-2 standout skills 90-99, rest 78-89
+    const standoutCount = randInt(rng, 1, 2);
+    const standouts = shuffle(rng, allKeys).slice(0, standoutCount);
+    for (const k of allKeys) {
+      if (standouts.includes(k)) skills[k] = randInt(rng, 90, 99);
+      else skills[k] = randInt(rng, 78, 89);
+    }
+  } else if (rarity === 'rare') {
+    // 1-2 skills 78-88, rest 68-78
+    const goodCount = randInt(rng, 1, 2);
+    const goods = shuffle(rng, allKeys).slice(0, goodCount);
+    for (const k of allKeys) {
+      if (goods.includes(k)) skills[k] = randInt(rng, 78, 88);
+      else skills[k] = randInt(rng, 68, 78);
+    }
+  } else if (rarity === 'uncommon') {
+    // All 60-75
+    for (const k of allKeys) skills[k] = randInt(rng, 60, 75);
+  } else {
+    // common: 45-65
+    for (const k of allKeys) skills[k] = randInt(rng, 45, 65);
+  }
+  return skills as Skills;
+}
+
+let nextId = 1;
+function makeId(prefix: string): string {
+  return `${prefix}_${(nextId++).toString(36)}_${Math.floor(Math.random() * 36 ** 4).toString(36)}`;
+}
+
+export function generateRider(
+  rng: Rng,
+  currentYear: number,
+  options: {
+    forcedRarity?: Rarity;
+    forcedAge?: number;
+    nationality?: string;
+    /** If provided, ~50% chance the rider is from one of these nations, else random. */
+    homeBiasNations?: string[];
+    /** If provided, bumps rarity roll one tier up by this probability (0-1). */
+    rarityBoost?: number;
+  } = {},
+): Rider {
+  let rarity = options.forcedRarity;
+  if (!rarity) {
+    rarity = weightedPick(rng, RARITY_WEIGHTS);
+    // Apply rarity boost (Nordkraft-style youth pipeline)
+    if (options.rarityBoost && rng() < options.rarityBoost) {
+      const upgrade: Record<Rarity, Rarity> = {
+        common: 'uncommon',
+        uncommon: 'rare',
+        rare: 'epic',
+        epic: 'legend',
+        legend: 'legend',
+      };
+      rarity = upgrade[rarity];
+    }
+  }
+
+  // Resolve nationality with home bias
+  let nationality: string;
+  if (options.nationality) {
+    nationality = options.nationality;
+  } else if (options.homeBiasNations && options.homeBiasNations.length > 0 && rng() < 0.5) {
+    nationality = pick(rng, options.homeBiasNations);
+  } else {
+    nationality = pick(rng, NATIONALITIES);
+  }
+
+  const firstName = pick(rng, FIRST_NAMES_BY_NATION[nationality]);
+  const lastName = pick(rng, LAST_NAMES_BY_NATION[nationality]);
+  const skills = rollSkillsForRarity(rng, rarity);
+  // Leadership and consistency rolled independently — common can have 90 leadership.
+  const leadership = randInt(rng, 30, 99);
+  const consistency = randInt(rng, 40, 95);
+
+  // Age: if forced, use forcedAge; otherwise rookie (20)
+  const age = options.forcedAge ?? randInt(rng, 20, 21);
+  const yearsAlreadyIn = age - 20;
+  // Career length 9-12. For an older seeded rider, ensure they have at least
+  // 1 year remaining (else they'd already be retired in year 1).
+  const minLength = Math.max(9, yearsAlreadyIn + 1);
+  const careerLength = Math.min(12, randInt(rng, minLength, 12));
+  // Rookie at age 20-21. So careerStartYear = currentYear - (age - 20).
+  const careerStartYear = currentYear - yearsAlreadyIn;
+
+  return {
+    id: makeId('r'),
+    name: `${firstName} ${lastName}`,
+    nationality,
+    rarity,
+    skills,
+    leadership,
+    consistency,
+    careerStartYear,
+    careerLength,
+    age,
+    teamId: '', // assigned later
+    phase: computePhase(age, careerStartYear, careerLength, currentYear),
+    retired: false,
+    history: [],
+    totals: {
+      points: 0, stageWins: 0, raceWins: 0, gtWins: 0,
+      tourWins: 0, giroWins: 0, vueltaWins: 0, monumentWins: 0,
+      youthJerseys: 0, mountainJerseys: 0, pointsJerseys: 0,
+    },
+  };
+}
+
+export function computePhase(
+  age: number,
+  careerStartYear: number,
+  careerLength: number,
+  currentYear: number,
+): CareerPhase {
+  const yearsIn = currentYear - careerStartYear;
+  if (yearsIn < 0) return 'rookie';
+  if (yearsIn >= careerLength) return 'retired';
+  if (yearsIn < 2) return 'rookie';
+  if (yearsIn >= careerLength - 2) return 'veteran';
+  return 'prime';
+}
+
+// Performance multiplier based on phase + how deep into veteran years.
+export function phaseMultiplier(rider: Rider, currentYear: number): number {
+  const yearsIn = currentYear - rider.careerStartYear;
+  const remaining = rider.careerLength - yearsIn;
+  if (yearsIn < 0) return 0.8;
+  if (yearsIn < 2) return 0.8;             // rookie
+  if (remaining > 2) return 1.0;           // prime
+  if (remaining === 2) return 0.9;         // first veteran year
+  if (remaining === 1) return 0.8;         // last year
+  return 0; // retired
+}
+
+// ============================================================================
+// DIRECTOR GENERATION
+// ============================================================================
+
+const ALL_SPECIALTIES: Director['specialty'][] = [
+  'gt', 'classics', 'sprints', 'mountains', 'cobbles', 'tt', 'youth', 'allround',
+];
+
+// Specialty determines which skills the "standout" boosts go to.
+// A `gt` director's standout skills are climbing+endurance+timeTrial.
+// A `cobbles` director is cobbles+endurance+sprinting.
+const SPECIALTY_FAVORED: Record<Director['specialty'], SkillKey[]> = {
+  gt:        ['climbing', 'endurance', 'timeTrial'],
+  classics:  ['breakaway', 'endurance', 'climbing'],
+  sprints:   ['sprinting', 'endurance'],
+  mountains: ['climbing', 'descending'],
+  cobbles:   ['cobbles', 'endurance', 'sprinting'],
+  tt:        ['timeTrial', 'endurance'],
+  youth:     ['endurance', 'climbing'],
+  allround:  ['climbing', 'sprinting', 'timeTrial'],
+};
+
+function rollDirectorBoosts(
+  rng: Rng,
+  rarity: Rarity,
+  specialty: Director['specialty'],
+): Record<SkillKey, number> {
+  const boosts: Partial<Record<SkillKey, number>> = {};
+  const keys = [...SKILL_KEYS];
+  const favored = SPECIALTY_FAVORED[specialty];
+
+  if (rarity === 'legend') {
+    // All skills 5%, favored skills get a small extra (capped at 6%)
+    for (const k of keys) boosts[k] = favored.includes(k) ? 0.06 : 0.05;
+  } else if (rarity === 'epic') {
+    // Favored skills at 5%, rest 3%
+    for (const k of keys) boosts[k] = favored.includes(k) ? 0.05 : 0.03;
+  } else if (rarity === 'rare') {
+    // Favored at 3%, one non-favored at 1%, rest 3%
+    const dip = pick(rng, keys.filter((k) => !favored.includes(k)));
+    for (const k of keys) boosts[k] = k === dip ? 0.01 : 0.03;
+  } else if (rarity === 'uncommon') {
+    // Favored at 3%, rest 1%
+    for (const k of keys) boosts[k] = favored.includes(k) ? 0.03 : 0.01;
+  } else {
+    // common: favored at 2%, rest 1%
+    for (const k of keys) boosts[k] = favored.includes(k) ? 0.02 : 0.01;
+  }
+  return boosts as Record<SkillKey, number>;
+}
+
+export function generateDirector(
+  rng: Rng,
+  options: { forcedSpecialty?: Director['specialty']; forcedRarity?: Rarity } = {},
+): Director {
+  const rarity = options.forcedRarity ?? weightedPick(rng, RARITY_WEIGHTS);
+  const specialty = options.forcedSpecialty ?? pick(rng, ALL_SPECIALTIES);
+  const nationality = pick(rng, NATIONALITIES);
+  const firstName = pick(rng, FIRST_NAMES_BY_NATION[nationality]);
+  const lastName = pick(rng, DIRECTOR_LASTNAMES);
+  return {
+    id: makeId('d'),
+    name: `${firstName} ${lastName}`,
+    nationality,
+    rarity,
+    specialty,
+    boosts: rollDirectorBoosts(rng, rarity, specialty),
+    teamId: null,
+    yearsActive: 0,
+    titlesWon: 0,
+  };
+}
+
+// ============================================================================
+// TEAM GENERATION (from fixed templates)
+// ============================================================================
+
+export function generateTeam(template: TeamTemplate): Team {
+  return {
+    id: `t_${template.shortName.toLowerCase()}`,
+    name: template.name,
+    shortName: template.shortName,
+    nationality: template.nationality,
+    primaryColor: template.primaryColor,
+    secondaryColor: template.secondaryColor,
+    emoji: template.emoji,
+    tagline: template.tagline,
+    bonus: template.bonus,
+    directorId: null,
+    riderIds: [],
+    history: [],
+    totals: {
+      points: 0, raceWins: 0, stageWins: 0, gtWins: 0,
+      tourWins: 0, giroWins: 0, vueltaWins: 0, monumentWins: 0,
+    },
+  };
+}
+
+// Map a team's bonus to the most natural director specialty for hiring matching.
+export function preferredSpecialtyForTeam(team: Team): Director['specialty'] {
+  switch (team.bonus.kind) {
+    case 'gt-tour':
+    case 'gt-giro':
+    case 'gt-vuelta':   return 'gt';
+    case 'tt-stages':
+    case 'precision':   return 'tt';
+    case 'cobbles':     return 'cobbles';
+    case 'flat':        return 'sprints';
+    case 'mountain':    return 'mountains';
+    case 'classics':    return 'classics';
+    case 'youth':       return 'youth';
+    case 'free-agent':
+    case 'allterrain':  return 'allround';
+  }
+}
+
+// ============================================================================
+// UNIVERSE GENERATION
+// ============================================================================
+
+const DIRECTOR_POOL_SIZE = 16; // 12 employed + 4 free agents
+
+export function generateUniverse(seed: number, startYear: number = 2026): Universe {
+  const rng = makeRng(seed);
+  nextId = 1;
+
+  // Build calendar
+  const calendar = buildBaseCalendar(rng);
+
+  // Build the 12 fixed teams from templates.
+  const teams: Record<string, Team> = {};
+  const teamList: Team[] = [];
+  for (const template of TEAM_TEMPLATES) {
+    const team = generateTeam(template);
+    teams[team.id] = team;
+    teamList.push(team);
+  }
+
+  // Build 16 directors. Each gets a specialty rolled.
+  // We bias the first 12 toward the teams' preferred specialties so each team
+  // can start with a reasonably-aligned director.
+  const directors: Record<string, Director> = {};
+  const directorList: Director[] = [];
+  for (let i = 0; i < DIRECTOR_POOL_SIZE; i++) {
+    let forcedSpecialty: Director['specialty'] | undefined;
+    if (i < 12) {
+      // Match team i's preferred specialty 50% of the time, else random.
+      if (rng() < 0.5) {
+        forcedSpecialty = preferredSpecialtyForTeam(teamList[i]);
+      }
+    }
+    const director = generateDirector(rng, { forcedSpecialty });
+    directors[director.id] = director;
+    directorList.push(director);
+  }
+
+  // Assign first 12 directors to the 12 teams.
+  // Teams pick the highest-rarity director matching their preferred specialty
+  // first; if none match, take the highest-rarity available.
+  const availableDirectors = [...directorList];
+  for (const team of teamList) {
+    const preferred = preferredSpecialtyForTeam(team);
+    // Sort: matching specialty first, then by rarity rank.
+    const RARITY_RANK: Record<Rarity, number> = {
+      legend: 5, epic: 4, rare: 3, uncommon: 2, common: 1,
+    };
+    availableDirectors.sort((a, b) => {
+      const aMatch = a.specialty === preferred ? 1 : 0;
+      const bMatch = b.specialty === preferred ? 1 : 0;
+      if (aMatch !== bMatch) return bMatch - aMatch;
+      return RARITY_RANK[b.rarity] - RARITY_RANK[a.rarity];
+    });
+    const hire = availableDirectors.shift();
+    if (hire) {
+      hire.teamId = team.id;
+      hire.yearsActive = 0;
+      team.directorId = hire.id;
+    }
+  }
+  // Remaining directors stay as free agents (teamId = null).
+
+  // Generate 120 riders. Year 1: ages varied 20-30, careers staggered.
+  // Each rider rolled with the destination team's homeBiasNations.
+  // First, decide team assignments roughly evenly by shuffling slot order.
+  const riders: Record<string, Rider> = {};
+  const allRiders: Rider[] = [];
+  // For each team, generate 10 riders biased toward its home nations.
+  for (const team of teamList) {
+    const template = TEAM_TEMPLATES.find((t) => t.shortName === team.shortName)!;
+    for (let i = 0; i < 10; i++) {
+      const age = randInt(rng, 20, 30);
+      const rider = generateRider(rng, startYear, {
+        forcedAge: age,
+        homeBiasNations: template.homeBiasNations,
+      });
+      rider.teamId = team.id;
+      team.riderIds.push(rider.id);
+      riders[rider.id] = rider;
+      allRiders.push(rider);
+    }
+  }
+
+  return {
+    seed,
+    currentYear: startYear,
+    startYear,
+    riders,
+    teams,
+    directors,
+    season: {
+      year: startYear,
+      currentEventIndex: 0,
+      calendar,
+      individualPoints: {},
+      teamPoints: {},
+      activeRace: null,
+      completedEvents: [],
+    },
+    hallOfFame: [],
+  };
+}

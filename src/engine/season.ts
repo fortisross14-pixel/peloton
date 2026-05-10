@@ -1,0 +1,310 @@
+import type {
+  Universe,
+  Rider,
+  CalendarEvent,
+  RaceState,
+  StageResult,
+  CompletedEventResult,
+} from '../types';
+import { makeRng, type Rng } from '../utils/random';
+import { simulateStage, buildClassifications } from './simulate';
+import { awardEventPoints } from './scoring';
+import { phaseMultiplier } from '../data/generators';
+
+// ============================================================================
+// ROSTER SELECTION
+// ============================================================================
+// Strategy: pick the riders best suited to the event's terrain, while also
+// making sure every rider participates in at least one Grand Tour during the
+// season. We track per-rider GT count in a side map at season start.
+
+function specialtyScore(rider: Rider, event: CalendarEvent, currentYear: number): number {
+  const phaseMul = phaseMultiplier(rider, currentYear);
+  if (phaseMul === 0) return -Infinity; // retired
+
+  const s = rider.skills;
+  switch (event.id) {
+    case 'tour':
+    case 'giro':
+    case 'vuelta':
+      // Mixed: GC riders want climbing + ITT + endurance, sprinters want sprinting
+      return Math.max(
+        s.climbing * 0.5 + s.timeTrial * 0.2 + s.endurance * 0.3,
+        s.sprinting * 0.6 + s.endurance * 0.2 + s.cobbles * 0.1,
+        s.breakaway * 0.5 + s.climbing * 0.3 + s.endurance * 0.2,
+      );
+    case 'flanders':
+    case 'roubaix':
+    case 'strade':
+      return s.cobbles * 0.7 + s.endurance * 0.2 + s.sprinting * 0.1;
+    case 'milan-sanremo':
+      return s.sprinting * 0.5 + s.endurance * 0.3 + s.climbing * 0.2;
+    case 'liege':
+    case 'amstel':
+    case 'fleche':
+    case 'san-sebastian':
+      return s.climbing * 0.4 + s.breakaway * 0.3 + s.endurance * 0.3;
+    case 'lombardia':
+      return s.climbing * 0.6 + s.endurance * 0.3 + s.descending * 0.1;
+    case 'worlds':
+      return s.climbing * 0.3 + s.endurance * 0.3 + s.breakaway * 0.2 + s.sprinting * 0.2;
+    default:
+      // week-stage races: similar to GT but smaller
+      return s.climbing * 0.4 + s.timeTrial * 0.2 + s.endurance * 0.2 + s.sprinting * 0.2;
+  }
+}
+
+// Track Grand Tour participation across the season so every rider does at least one.
+function getGTParticipation(universe: Universe): Record<string, number> {
+  const map: Record<string, number> = {};
+  for (const event of universe.season.calendar) {
+    if (event.category !== 'grand-tour') continue;
+    const completed = universe.season.completedEvents.find((c) => c.eventId === event.id);
+    if (!completed) continue;
+    for (const rid of completed.participants) {
+      map[rid] = (map[rid] ?? 0) + 1;
+    }
+  }
+  return map;
+}
+
+// Look ahead: how many remaining GTs after this one (inclusive)?
+function remainingGTs(universe: Universe, fromIndex: number): CalendarEvent[] {
+  return universe.season.calendar
+    .slice(fromIndex)
+    .filter((e) => e.category === 'grand-tour');
+}
+
+function selectRoster(universe: Universe, event: CalendarEvent): string[] {
+  const teamRosters: Record<string, string[]> = {};
+  const slotsPerTeam = event.ridersPerTeam;
+  const isGT = event.category === 'grand-tour';
+  const gtMap = getGTParticipation(universe);
+  const remainingGTsList = remainingGTs(universe, universe.season.currentEventIndex);
+
+  for (const team of Object.values(universe.teams)) {
+    // Filter active riders only
+    const active = team.riderIds
+      .map((id) => universe.riders[id])
+      .filter((r) => r && !r.retired && phaseMultiplier(r, universe.currentYear) > 0);
+
+    let candidates = active.map((r) => ({
+      rider: r,
+      score: specialtyScore(r, event, universe.currentYear),
+      gtsDone: gtMap[r.id] ?? 0,
+    }));
+
+    if (isGT) {
+      // Riders with 0 GTs done so far + few remaining GTs after this one
+      // get a priority boost so they don't get skipped.
+      const remaining = remainingGTsList.length; // includes current GT
+      candidates = candidates.map((c) => {
+        const needsGT = c.gtsDone === 0;
+        // If a rider hasn't done a GT and there are few remaining, big boost
+        const urgency = needsGT ? 100 / Math.max(1, remaining) : 0;
+        return { ...c, score: c.score + urgency * 10 };
+      });
+    }
+
+    // Sort by score, take top N
+    candidates.sort((a, b) => b.score - a.score);
+    teamRosters[team.id] = candidates.slice(0, slotsPerTeam).map((c) => c.rider.id);
+  }
+
+  return Object.values(teamRosters).flat();
+}
+
+// ============================================================================
+// RACE LIFECYCLE
+// ============================================================================
+
+export function startRace(universe: Universe): void {
+  if (universe.season.activeRace) return; // already in race
+  const event = universe.season.calendar[universe.season.currentEventIndex];
+  if (!event) return; // no events left
+
+  const participants = selectRoster(universe, event);
+
+  universe.season.activeRace = {
+    eventId: event.id,
+    year: universe.currentYear,
+    participants,
+    stageResults: [],
+    gc: [],
+    teamGc: [],
+    currentStep: 0,
+    totalSteps: event.stepsCount,
+    stageWinsByRider: {},
+    finished: false,
+  };
+}
+
+export function simulateNextStep(universe: Universe): void {
+  const race = universe.season.activeRace;
+  if (!race || race.finished) return;
+  const event = universe.season.calendar[universe.season.currentEventIndex];
+  if (!event) return;
+
+  // How many stages per step?
+  const stagesPerStep = Math.ceil(event.stages.length / event.stepsCount);
+  const startStage = race.currentStep * stagesPerStep;
+  const endStage = Math.min(startStage + stagesPerStep, event.stages.length);
+
+  const rng = makeRng(
+    universe.seed +
+      universe.currentYear * 1000 +
+      hash(event.id) +
+      race.currentStep * 17,
+  );
+
+  const participantRiders = race.participants
+    .map((id) => universe.riders[id])
+    .filter(Boolean);
+  const ridersByTeam: Record<string, Rider[]> = {};
+  for (const r of participantRiders) {
+    if (!ridersByTeam[r.teamId]) ridersByTeam[r.teamId] = [];
+    ridersByTeam[r.teamId].push(r);
+  }
+
+  for (let i = startStage; i < endStage; i++) {
+    const stage = event.stages[i];
+    const result = simulateStage({
+      stage,
+      participants: participantRiders,
+      ridersByTeam,
+      teams: universe.teams,
+      directors: universe.directors,
+      currentYear: universe.currentYear,
+      rng,
+      stagesElapsed: i,
+      totalStagesInRace: event.stages.length,
+      raceCategory: event.category,
+      eventId: event.id,
+    });
+    result.stageIndex = i;
+    race.stageResults.push(result);
+    // Stage win tracker
+    const winner = result.finishers[0]?.riderId;
+    if (winner) {
+      race.stageWinsByRider[winner] = (race.stageWinsByRider[winner] ?? 0) + 1;
+    }
+  }
+
+  // Rebuild classifications
+  const classifications = buildClassifications(
+    participantRiders,
+    race.stageResults,
+    universe.currentYear,
+  );
+  race.gc = classifications.gc;
+  race.teamGc = classifications.teamGc;
+  race.currentStep++;
+
+  // Race finished?
+  if (race.currentStep >= race.totalSteps) {
+    finishRace(universe);
+  }
+}
+
+function finishRace(universe: Universe): void {
+  const race = universe.season.activeRace;
+  if (!race) return;
+  const event = universe.season.calendar[universe.season.currentEventIndex];
+  if (!event) return;
+
+  race.finished = true;
+
+  // Determine jerseys
+  const sortedByPoints = [...race.gc].sort(
+    (a, b) => b.pointsClassification - a.pointsClassification,
+  );
+  const sortedByMountain = [...race.gc].sort(
+    (a, b) => b.mountainClassification - a.mountainClassification,
+  );
+  const sortedByYouth = race.gc.filter((r) => r.isYoung);
+
+  const jerseys = {
+    gc: race.gc[0]?.riderId ?? '',
+    points: sortedByPoints[0]?.riderId ?? '',
+    mountain: sortedByMountain[0]?.riderId ?? '',
+    youth: sortedByYouth[0]?.riderId ?? null,
+    teamWinnerId: race.teamGc[0]?.teamId ?? '',
+  };
+  race.jerseys = jerseys;
+
+  // Award season points
+  awardEventPoints(event, race.gc, race.stageResults, jerseys, universe);
+
+  // Save completed event
+  const stageWinners = race.stageResults.map((sr) => ({
+    stageIndex: sr.stageIndex,
+    riderId: sr.finishers[0]?.riderId ?? '',
+  }));
+  const completed: CompletedEventResult = {
+    eventId: event.id,
+    year: universe.currentYear,
+    finalGc: race.gc.slice(0, 30),
+    participants: [...race.participants],
+    jerseys,
+    stageWinners,
+  };
+  universe.season.completedEvents.push(completed);
+
+  // Update each rider's season history (lightweight — only the GC finisher rows
+  // have data here; we log positions for top 30 + jerseys + stage wins).
+  const eventId = event.id;
+  for (const row of race.gc) {
+    const rider = universe.riders[row.riderId];
+    if (!rider) continue;
+    let yearStats = rider.history.find((h) => h.year === universe.currentYear);
+    if (!yearStats) {
+      yearStats = {
+        year: universe.currentYear,
+        age: rider.age,
+        teamId: rider.teamId,
+        phase: rider.phase,
+        points: 0,
+        stageWins: 0,
+        raceWins: 0,
+        grandTourFinishes: {},
+        jerseys: { gc: [], points: [], mountain: [], youth: [] },
+      };
+      rider.history.push(yearStats);
+    }
+    if (event.category === 'grand-tour') {
+      yearStats.grandTourFinishes[event.id] = row.position;
+    }
+    yearStats.stageWins += race.stageWinsByRider[rider.id] ?? 0;
+    if (jerseys.gc === rider.id) {
+      yearStats.raceWins += 1;
+      yearStats.jerseys.gc.push(eventId);
+    }
+    if (jerseys.points === rider.id) yearStats.jerseys.points.push(eventId);
+    if (jerseys.mountain === rider.id) yearStats.jerseys.mountain.push(eventId);
+    if (jerseys.youth === rider.id) yearStats.jerseys.youth.push(eventId);
+    yearStats.points = universe.season.individualPoints[rider.id] ?? 0;
+  }
+}
+
+// Advance: dismiss the active race so the user can pick the next event.
+export function dismissRace(universe: Universe): void {
+  if (!universe.season.activeRace?.finished) return;
+  universe.season.activeRace = null;
+  universe.season.currentEventIndex++;
+}
+
+// ============================================================================
+// END OF SEASON
+// ============================================================================
+
+export function isSeasonOver(universe: Universe): boolean {
+  return universe.season.currentEventIndex >= universe.season.calendar.length;
+}
+
+function hash(s: string): number {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) {
+    h = (h * 31 + s.charCodeAt(i)) >>> 0;
+  }
+  return h;
+}

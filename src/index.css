@@ -1,0 +1,121 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+}
+
+html, body, #root {
+  height: 100%;
+}
+
+body {
+  background-color: #f4ead5;
+  color: #1a1814;
+  font-family: 'EB Garamond', Georgia, serif;
+  font-size: 16px;
+  line-height: 1.5;
+  /* subtle paper grain */
+  background-image:
+    radial-gradient(at 20% 10%, rgba(168, 38, 31, 0.04) 0%, transparent 40%),
+    radial-gradient(at 80% 80%, rgba(232, 197, 71, 0.06) 0%, transparent 40%),
+    url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0.1 0 0 0 0 0.09 0 0 0 0 0.08 0 0 0 0.04 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  background-attachment: fixed;
+}
+
+/* numerical/tabular alignment for results */
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+/* hand-drawn rule */
+.rule {
+  height: 1px;
+  background: linear-gradient(to right, transparent, #1a1814 15%, #1a1814 85%, transparent);
+  opacity: 0.6;
+}
+
+.rule-thick {
+  height: 3px;
+  background: #1a1814;
+  position: relative;
+}
+.rule-thick::after {
+  content: '';
+  position: absolute;
+  bottom: -4px;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: #1a1814;
+}
+
+/* vintage button */
+.btn-vintage {
+  font-family: 'Bebas Neue', Impact, sans-serif;
+  letter-spacing: 0.08em;
+  background: #1a1814;
+  color: #f4ead5;
+  padding: 0.6rem 1.4rem;
+  border: 2px solid #1a1814;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  display: inline-block;
+  text-transform: uppercase;
+}
+.btn-vintage:hover {
+  background: #a8261f;
+  border-color: #a8261f;
+}
+.btn-vintage:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.btn-vintage.outline {
+  background: transparent;
+  color: #1a1814;
+}
+.btn-vintage.outline:hover {
+  background: #1a1814;
+  color: #f4ead5;
+}
+
+/* card on paper */
+.card-paper {
+  background: rgba(255, 252, 240, 0.6);
+  border: 1px solid rgba(26, 24, 20, 0.15);
+  box-shadow: 0 1px 0 rgba(26, 24, 20, 0.05),
+              4px 4px 0 rgba(26, 24, 20, 0.04);
+}
+
+/* jersey badges */
+.jersey-yellow { background: #e8c547; color: #1a1814; }
+.jersey-green { background: #3d6b3a; color: #fafafa; }
+.jersey-polka { background: #fafafa; color: #b03b4d; border: 1px solid #b03b4d; }
+.jersey-white { background: #fafafa; color: #1a1814; border: 1px solid #1a1814; }
+
+/* rarity colors (subdued for paper aesthetic) */
+.rarity-legend { color: #a8261f; font-weight: 700; }
+.rarity-epic { color: #7a4a1a; font-weight: 600; }
+.rarity-rare { color: #2a4a6b; font-weight: 500; }
+.rarity-uncommon { color: #3d6b3a; }
+.rarity-common { color: #5a5248; }
+
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.animate-fade-in { animation: fade-in 0.3s ease forwards; }
+
+@keyframes stamp-in {
+  0% { opacity: 0; transform: scale(1.4) rotate(-3deg); }
+  60% { opacity: 1; transform: scale(0.95) rotate(-1deg); }
+  100% { opacity: 1; transform: scale(1) rotate(-1deg); }
+}
+.animate-stamp { animation: stamp-in 0.4s ease forwards; }
+
+/* scrollbar */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: #e8dcc0; }
+::-webkit-scrollbar-thumb { background: #1a1814; }
