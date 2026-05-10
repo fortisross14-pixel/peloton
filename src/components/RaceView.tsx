@@ -1,5 +1,6 @@
 import { useGame } from '../state/store';
 import { formatTime, formatGap } from '../utils/random';
+import { flagFor } from '../utils/flags';
 import type { CalendarEvent, StageResult } from '../types';
 
 export function RaceView() {
@@ -126,40 +127,85 @@ function StepBlock({
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
         {/* Stage podiums */}
-        <div className="lg:col-span-2 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
-          {stages.map((stage) => (
-            <div key={stage.stageIndex} className="card-paper p-4">
-              <div className="flex items-baseline justify-between mb-2">
-                <div className="font-display font-bold">Stage {stage.stageIndex + 1}</div>
-                <div className="font-sans tracking-widest text-[10px] opacity-50 uppercase">
-                  {stage.stageType.replace('-', ' ')}
+        <div className="lg:col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-4">
+          {stages.map((stage) => {
+            // Build a quick lookup of rider id -> finishing position in this stage
+            // so we can show how the GC top-3 fared on this specific stage.
+            const positionByRider = new Map<string, number>();
+            stage.finishers.forEach((f, i) => positionByRider.set(f.riderId, i + 1));
+            const topGcInThisStage = (gcSnapshot ?? []).slice(0, 3);
+
+            return (
+              <div key={stage.stageIndex} className="card-paper p-4 flex flex-col">
+                <div className="flex items-baseline justify-between mb-2">
+                  <div className="font-display font-bold">Stage {stage.stageIndex + 1}</div>
+                  <div className="font-sans tracking-widest text-[10px] opacity-50 uppercase">
+                    {stage.stageType.replace('-', ' ')}
+                  </div>
                 </div>
+                <div className="font-body italic text-xs opacity-60 mb-3 truncate">
+                  {stage.stageName.replace(/^Stage \d+ — /, '')} · {stage.distanceKm} km
+                </div>
+                <ol className="space-y-1 tabular text-sm">
+                  {stage.finishers.slice(0, 10).map((f, i) => {
+                    const r = universe.riders[f.riderId];
+                    const t = universe.teams[f.teamId];
+                    if (!r) return null;
+                    return (
+                      <li key={f.riderId} className="flex items-baseline gap-2">
+                        <span className="font-mono text-rouge font-bold w-5">{i + 1}</span>
+                        <span className="text-sm leading-none shrink-0">{flagFor(r.nationality)}</span>
+                        <button
+                          className="flex-1 text-left hover:underline truncate font-body"
+                          onClick={() => onSelectRider(f.riderId)}
+                        >
+                          {r.name}
+                        </button>
+                        <span className="font-mono text-[10px] opacity-50 uppercase shrink-0">{t?.shortName}</span>
+                        <span className="font-mono text-xs opacity-70 w-16 text-right">
+                          {i === 0 ? formatTime(f.timeSeconds) : formatGap(f.gapSeconds)}
+                        </span>
+                      </li>
+                    );
+                  })}
+                </ol>
+
+                {/* GC top-3 placement in this specific stage */}
+                {topGcInThisStage.length > 0 && (
+                  <div className="mt-4 pt-3 border-t border-ink/15">
+                    <div className="font-sans tracking-widest text-[9px] opacity-50 uppercase mb-1.5">
+                      GC Leaders Here
+                    </div>
+                    <ol className="space-y-0.5 tabular text-xs">
+                      {topGcInThisStage.map((row) => {
+                        const r = universe.riders[row.riderId];
+                        if (!r) return null;
+                        const stagePos = positionByRider.get(row.riderId) ?? null;
+                        const stageRow = stagePos ? stage.finishers[stagePos - 1] : null;
+                        return (
+                          <li key={row.riderId} className="flex items-baseline gap-2 opacity-80">
+                            <span className="font-mono w-5 opacity-60">{row.position}.</span>
+                            <span className="leading-none shrink-0">{flagFor(r.nationality)}</span>
+                            <span className="flex-1 truncate font-body">{r.name}</span>
+                            <span className="font-mono w-12 text-right">
+                              {stagePos ? `${stagePos}` : '—'}
+                            </span>
+                            <span className="font-mono w-16 text-right opacity-70">
+                              {stageRow
+                                ? (stagePos === 1
+                                    ? formatTime(stageRow.timeSeconds)
+                                    : formatGap(stageRow.gapSeconds))
+                                : ''}
+                            </span>
+                          </li>
+                        );
+                      })}
+                    </ol>
+                  </div>
+                )}
               </div>
-              <div className="font-body italic text-xs opacity-60 mb-3 truncate">
-                {stage.stageName.replace(/^Stage \d+ — /, '')} · {stage.distanceKm} km
-              </div>
-              <ol className="space-y-1.5 tabular text-sm">
-                {stage.finishers.slice(0, 3).map((f, i) => {
-                  const r = universe.riders[f.riderId];
-                  if (!r) return null;
-                  return (
-                    <li key={f.riderId} className="flex items-baseline gap-2">
-                      <span className="font-mono text-rouge font-bold w-4">{i + 1}</span>
-                      <button
-                        className="flex-1 text-left hover:underline truncate font-body"
-                        onClick={() => onSelectRider(f.riderId)}
-                      >
-                        {r.name}
-                      </button>
-                      <span className="font-mono text-xs opacity-70">
-                        {i === 0 ? formatTime(f.timeSeconds) : formatGap(f.gapSeconds)}
-                      </span>
-                    </li>
-                  );
-                })}
-              </ol>
-            </div>
-          ))}
+            );
+          })}
         </div>
 
         {/* Snapshot of GC + team after this step */}
@@ -177,9 +223,10 @@ function StepBlock({
                   if (!r) return null;
                   return (
                     <li key={row.riderId} className="flex items-baseline gap-2">
-                      <span className={`font-mono w-4 ${row.position === 1 ? 'text-rouge font-bold' : 'opacity-60'}`}>
+                      <span className={`font-mono w-5 ${row.position === 1 ? 'text-rouge font-bold' : 'opacity-60'}`}>
                         {row.position}
                       </span>
+                      <span className="leading-none shrink-0">{flagFor(r.nationality)}</span>
                       <button
                         className="flex-1 text-left hover:underline truncate font-body"
                         onClick={() => onSelectRider(row.riderId)}
@@ -268,6 +315,7 @@ function FinalResults({
                   <span className={`font-mono w-5 ${row.position <= 3 ? 'text-rouge font-bold' : 'opacity-60'}`}>
                     {row.position}
                   </span>
+                  <span className="leading-none shrink-0">{flagFor(r.nationality)}</span>
                   <button
                     className="flex-1 text-left hover:underline font-body truncate"
                     onClick={() => onSelectRider(row.riderId)}
@@ -357,11 +405,12 @@ function FinalResults({
               return (
                 <button
                   key={rid}
-                  className="font-body hover:underline"
+                  className="font-body hover:underline flex items-center gap-1.5"
                   onClick={() => onSelectRider(rid)}
                 >
+                  <span>{flagFor(r.nationality)}</span>
                   <span className="font-bold">{r.name}</span>
-                  <span className="font-mono text-rouge ml-1">×{count}</span>
+                  <span className="font-mono text-rouge">×{count}</span>
                 </button>
               );
             })}
