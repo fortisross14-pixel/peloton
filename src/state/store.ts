@@ -11,8 +11,8 @@ import {
 } from '../engine/season';
 import { endSeason } from '../engine/offseason';
 
-const STORAGE_KEY = 'peloton.v4';
-const LEGACY_KEYS = ['peloton.v1', 'peloton.v2', 'peloton.v3'];
+const STORAGE_KEY = 'peloton.v5';
+const LEGACY_KEYS = ['peloton.v1', 'peloton.v2', 'peloton.v3', 'peloton.v4'];
 
 interface GameStore {
   universe: Universe | null;
@@ -90,6 +90,13 @@ export const useGame = create<GameStore>((set, get) => ({
       const riderHist = sampleRider?.history[0];
       if ((teamHist && !('raceWinsBy' in teamHist)) || (riderHist && !('raceWinsBy' in riderHist))) {
         console.warn('Save schema mismatch (pre-v3) — discarding old save.');
+        localStorage.removeItem(STORAGE_KEY);
+        return false;
+      }
+      // v5: every rider should have an archetype field.
+      const anyRider = Object.values(universe.riders)[0];
+      if (anyRider && !('archetype' in anyRider)) {
+        console.warn('Save schema mismatch (pre-v5) — discarding old save.');
         localStorage.removeItem(STORAGE_KEY);
         return false;
       }

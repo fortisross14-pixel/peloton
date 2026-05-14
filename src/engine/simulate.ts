@@ -11,6 +11,7 @@ import type {
   CalendarEvent,
   RaceState,
   Universe,
+  Archetype,
 } from '../types';
 import type { Rng } from '../utils/random';
 import { gaussian, clamp } from '../utils/random';
@@ -107,6 +108,57 @@ function scoreRiderForStage(
   return score;
 }
 
+/**
+ * Archetype-based stage score adjustment, applied to the rawScore BEFORE
+ * variance. Positive values = bonus (rider in their element). Negative = soft
+ * penalty (rider saving energy / out of comfort zone).
+ *
+ * This is what makes sprinters lose GC time on mountains even though their
+ * climbing skill is decent — they aren't trying.
+ */
+function archetypeStageAdjustment(arch: Archetype, stageType: StageType): number {
+  switch (arch) {
+    case 'sprinter':
+      // Sprinter saves legs on climbing days; contests the line on flats.
+      if (stageType === 'mountain-hard') return -8;
+      if (stageType === 'mountain') return -5;
+      if (stageType === 'hilly') return -1;
+      if (stageType === 'flat') return +3;
+      if (stageType === 'itt') return -3;
+      return 0;
+    case 'climber':
+      // Climbers gain a small lift in mountains, lose a touch on sprints.
+      if (stageType === 'mountain-hard') return +3;
+      if (stageType === 'mountain') return +2;
+      if (stageType === 'flat') return -2;
+      if (stageType === 'cobbles') return -2;
+      return 0;
+    case 'gc':
+      // GC contenders are everywhere but never the absolute fastest.
+      // Slight lift on mountain-hard (their podium-defining days), neutral elsewhere.
+      if (stageType === 'mountain-hard') return +2;
+      if (stageType === 'itt') return +1;
+      return 0;
+    case 'rouleur':
+      if (stageType === 'itt') return +3;
+      if (stageType === 'cobbles') return +2;
+      if (stageType === 'mountain-hard') return -3;
+      return 0;
+    case 'puncheur':
+      if (stageType === 'hilly') return +3;
+      if (stageType === 'mountain-hard') return -2;
+      if (stageType === 'flat') return -1;
+      return 0;
+    case 'classics':
+      if (stageType === 'cobbles') return +3;
+      if (stageType === 'hilly') return +1;
+      if (stageType === 'mountain-hard') return -3;
+      return 0;
+    case 'allrounder':
+      return 0;
+  }
+}
+
 // ============================================================================
 // STAGE SIMULATION
 // ============================================================================
@@ -152,14 +204,19 @@ export function simulateStage(input: SimulateStageInput): StageResult {
     const teamMult = teamBonusMultiplier(team, stage.type, eventId, raceCategory);
     rawScore *= teamMult;
 
-    // Random variance — wider for low-consistency riders. Tuned higher so
-    // the same star doesn't dominate every race.
+    // Archetype-based score adjustments. These are the difference between a
+    // raw-skills sim and one that actually behaves like real cycling: a
+    // sprinter can have decent climbing skill (78) but they save legs on
+    // mountain stages and lose time; a climber doesn't contest bunch sprints.
+    rawScore += archetypeStageAdjustment(rider.archetype, stage.type);
+
+    // Random variance — wider for low-consistency riders.
     const variance = (100 - rider.consistency) * 0.25 + 4;
     rawScore += gaussian(rng) * variance;
 
     // Grand Tour fatigue: rider with low endurance fades in week 3.
     if (isGT) {
-      const enduranceFactor = (rider.skills.endurance - 70) / 30; // -2.3 to 1.0
+      const enduranceFactor = (rider.skills.endurance - 70) / 30;
       const fatigueLoss = (1 - enduranceFactor) * fatigueProgress * 4;
       rawScore -= fatigueLoss;
     }
@@ -322,24 +379,62 @@ export function buildClassifications(
     mountainClass[r.id] = 0;
   }
 
-  // Points per stage finishing position (for sprinter jersey)
-  const stagePoints = [50, 40, 32, 26, 22, 18, 14, 10, 8, 6, 4, 2, 1];
-  // Mountain points (only mountain stages, top 5 only)
-  const mountainPoints = [25, 20, 15, 10, 5];
+  // Points per stage finishing position. Only top 5 score.
+  // Sprinters get +30% on flat & hilly stages where they actually contest.
+  // Climbers get +30% on mountain stages for the KOM-feeding placements.
+  const stagePointsTable = [50, 30, 20, 12, 6];
+
+  // Base "winner of this terrain" multiplier — flat is the sprinter day,
+  // hilly the puncheur day, mountain the climber's playground, ITT a TT day.
+  const STAGE_TYPE_POINTS_MULT: Record<string, number> = {
+    flat: 1.0,
+    hilly: 0.7,
+    mountain: 0.55,
+    'mountain-hard': 0.5,
+    itt: 0.6,
+    ttt: 0.3,
+    cobbles: 0.85,
+  };
+
+  // Mountain points (only mountain stages, top 3 only). Mountain-hard doubles.
+  const mountainPointsTable = [25, 15, 8];
+
+  // Helper: archetype-specific multipliers for the classifications
+  function pointsMultFor(arch: Archetype, stageType: string): number {
+    if (arch === 'sprinter' && (stageType === 'flat' || stageType === 'hilly')) return 1.3;
+    if (arch === 'puncheur' && stageType === 'hilly') return 1.15;
+    return 1.0;
+  }
+  function mountainMultFor(arch: Archetype): number {
+    if (arch === 'climber') return 1.3;
+    if (arch === 'puncheur') return 1.1;
+    if (arch === 'gc') return 1.05;
+    // sprinter/rouleur/classics get base — they barely score here anyway
+    return 1.0;
+  }
+  // Quick lookup: rider id -> archetype
+  const archByRider: Record<string, Archetype> = {};
+  for (const r of participants) archByRider[r.id] = r.archetype;
 
   for (const sr of stageResults) {
     for (const f of sr.finishers) {
       totalTime[f.riderId] = (totalTime[f.riderId] ?? 0) + f.timeSeconds;
     }
-    // Points classification
-    sr.finishers.slice(0, stagePoints.length).forEach((f, i) => {
-      const mult = sr.stageType === 'flat' ? 1.5 : 1;
-      pointsClass[f.riderId] = (pointsClass[f.riderId] ?? 0) + stagePoints[i] * mult;
+    // Points classification (only top 5 finishers, weighted by stage type)
+    const baseMult = STAGE_TYPE_POINTS_MULT[sr.stageType] ?? 1.0;
+    sr.finishers.slice(0, stagePointsTable.length).forEach((f, i) => {
+      const archMult = pointsMultFor(archByRider[f.riderId] ?? 'allrounder', sr.stageType);
+      const award = stagePointsTable[i] * baseMult * archMult;
+      pointsClass[f.riderId] = (pointsClass[f.riderId] ?? 0) + award;
     });
-    // Mountain classification (only mountain stages)
+    // Mountain classification: only mountain stages, top 3 only.
+    // Mountain-hard stages (queen stages) award double mountain points.
     if (sr.stageType === 'mountain' || sr.stageType === 'mountain-hard') {
-      sr.finishers.slice(0, mountainPoints.length).forEach((f, i) => {
-        mountainClass[f.riderId] = (mountainClass[f.riderId] ?? 0) + mountainPoints[i];
+      const doubleIt = sr.stageType === 'mountain-hard' ? 2 : 1;
+      sr.finishers.slice(0, mountainPointsTable.length).forEach((f, i) => {
+        const archMult = mountainMultFor(archByRider[f.riderId] ?? 'allrounder');
+        const award = mountainPointsTable[i] * doubleIt * archMult;
+        mountainClass[f.riderId] = (mountainClass[f.riderId] ?? 0) + award;
       });
     }
   }

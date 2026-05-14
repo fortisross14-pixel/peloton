@@ -4,6 +4,19 @@
 
 export type Rarity = 'legend' | 'epic' | 'rare' | 'uncommon' | 'common';
 
+/**
+ * Rider archetype — drives skill profile at generation, awards bonuses
+ * during racing, and determines who wins which classification.
+ */
+export type Archetype =
+  | 'climber'         // mountain stages, KOM jersey
+  | 'sprinter'        // flat stages, Points jersey
+  | 'gc'              // Grand Tour overall contender
+  | 'rouleur'         // ITT specialist, cobbled classics
+  | 'puncheur'        // hilly classics (Liège, Amstel, Flèche)
+  | 'classics'        // monuments (Flanders, Roubaix)
+  | 'allrounder';     // versatile, no peak skill
+
 export const RARITY_ORDER: Rarity[] = ['legend', 'epic', 'rare', 'uncommon', 'common'];
 
 // Probability distribution for rarity rolls (mirrors CL game vibe)
@@ -13,6 +26,36 @@ export const RARITY_WEIGHTS: Record<Rarity, number> = {
   rare: 0.25,
   uncommon: 0.35,
   common: 0.25,
+};
+
+export const ARCHETYPE_WEIGHTS: Record<Archetype, number> = {
+  climber: 0.18,
+  sprinter: 0.18,
+  gc: 0.12,
+  rouleur: 0.10,
+  puncheur: 0.12,
+  classics: 0.10,
+  allrounder: 0.20,
+};
+
+export const ARCHETYPE_LABELS: Record<Archetype, string> = {
+  climber: 'Climber',
+  sprinter: 'Sprinter',
+  gc: 'GC Contender',
+  rouleur: 'Rouleur',
+  puncheur: 'Puncheur',
+  classics: 'Classics Hunter',
+  allrounder: 'All-rounder',
+};
+
+export const ARCHETYPE_TAGLINES: Record<Archetype, string> = {
+  climber: 'Lives in the mountains, contests KOM jerseys.',
+  sprinter: 'Bunch-sprint specialist, contests Points jerseys.',
+  gc: 'Built for Grand Tour overall classifications.',
+  rouleur: 'Time trial specialist, also strong on the cobbles.',
+  puncheur: 'Punchy on short steep climbs, hilly classics.',
+  classics: 'Cobbled monuments and tough one-day races.',
+  allrounder: 'Versatile rider, no single peak skill.',
 };
 
 // ============================================================================
@@ -84,6 +127,7 @@ export interface Rider {
   name: string;
   nationality: string;
   rarity: Rarity;
+  archetype: Archetype;
   skills: Skills;          // base skills, 1-99
   leadership: number;      // 1-99, independent from rarity
   consistency: number;     // 1-99, variance reducer

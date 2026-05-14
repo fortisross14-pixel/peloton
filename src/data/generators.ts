@@ -7,8 +7,9 @@ import type {
   Team,
   Universe,
   CareerPhase,
+  Archetype,
 } from '../types';
-import { RARITY_WEIGHTS, SKILL_KEYS } from '../types';
+import { RARITY_WEIGHTS, SKILL_KEYS, ARCHETYPE_WEIGHTS } from '../types';
 import {
   makeRng,
   randInt,
@@ -32,36 +33,50 @@ import { TEAM_TEMPLATES, type TeamTemplate } from './teams';
 // RIDER GENERATION
 // ============================================================================
 
-function rollSkillsForRarity(rng: Rng, rarity: Rarity): Skills {
-  // Returns 7 base skills. Leadership rolled separately.
+/** Favored skills for each archetype. These get the "specialty" range. */
+const ARCHETYPE_FAVORED: Record<Archetype, SkillKey[]> = {
+  climber:    ['climbing', 'descending'],
+  sprinter:   ['sprinting', 'endurance'],
+  gc:         ['climbing', 'timeTrial'],
+  rouleur:    ['timeTrial', 'cobbles'],
+  puncheur:   ['breakaway', 'climbing'],
+  classics:   ['cobbles', 'breakaway', 'endurance'],
+  allrounder: [], // no peak — all skills sit at the avg range
+};
+
+/**
+ * Skill roll ranges by rarity:
+ *   { favored: [min,max], other: [min,max] }
+ * Allrounders use a blended range for all skills.
+ */
+const SKILL_RANGES: Record<Rarity, { favored: [number, number]; other: [number, number]; allround: [number, number] }> = {
+  legend:   { favored: [95, 100], other: [78, 88], allround: [82, 92] },
+  epic:     { favored: [90, 95],  other: [74, 84], allround: [78, 86] },
+  rare:     { favored: [85, 90],  other: [70, 80], allround: [74, 82] },
+  uncommon: { favored: [80, 85],  other: [60, 70], allround: [66, 74] },
+  common:   { favored: [70, 80],  other: [45, 60], allround: [55, 65] },
+};
+
+function rollSkills(rng: Rng, rarity: Rarity, archetype: Archetype): Skills {
   const skills: Partial<Skills> = {};
   const allKeys = [...SKILL_KEYS];
+  const ranges = SKILL_RANGES[rarity];
 
-  if (rarity === 'legend') {
-    // All skills 88-99 (kept slightly broader than spec for variance)
-    for (const k of allKeys) skills[k] = randInt(rng, 88, 99);
-  } else if (rarity === 'epic') {
-    // 1-2 standout skills 90-99, rest 78-89
-    const standoutCount = randInt(rng, 1, 2);
-    const standouts = shuffle(rng, allKeys).slice(0, standoutCount);
+  if (archetype === 'allrounder') {
+    // Allrounders have no peak — every skill rolls in the "allround" range.
     for (const k of allKeys) {
-      if (standouts.includes(k)) skills[k] = randInt(rng, 90, 99);
-      else skills[k] = randInt(rng, 78, 89);
+      skills[k] = randInt(rng, ranges.allround[0], ranges.allround[1]);
     }
-  } else if (rarity === 'rare') {
-    // 1-2 skills 78-88, rest 68-78
-    const goodCount = randInt(rng, 1, 2);
-    const goods = shuffle(rng, allKeys).slice(0, goodCount);
-    for (const k of allKeys) {
-      if (goods.includes(k)) skills[k] = randInt(rng, 78, 88);
-      else skills[k] = randInt(rng, 68, 78);
+    return skills as Skills;
+  }
+
+  const favored = new Set(ARCHETYPE_FAVORED[archetype]);
+  for (const k of allKeys) {
+    if (favored.has(k)) {
+      skills[k] = randInt(rng, ranges.favored[0], ranges.favored[1]);
+    } else {
+      skills[k] = randInt(rng, ranges.other[0], ranges.other[1]);
     }
-  } else if (rarity === 'uncommon') {
-    // All 60-75
-    for (const k of allKeys) skills[k] = randInt(rng, 60, 75);
-  } else {
-    // common: 45-65
-    for (const k of allKeys) skills[k] = randInt(rng, 45, 65);
   }
   return skills as Skills;
 }
@@ -77,6 +92,7 @@ export function generateRider(
   options: {
     forcedRarity?: Rarity;
     forcedAge?: number;
+    forcedArchetype?: Archetype;
     nationality?: string;
     /** If provided, ~50% chance the rider is from one of these nations, else random. */
     homeBiasNations?: string[];
@@ -100,6 +116,8 @@ export function generateRider(
     }
   }
 
+  const archetype = options.forcedArchetype ?? weightedPick(rng, ARCHETYPE_WEIGHTS);
+
   // Resolve nationality with home bias
   let nationality: string;
   if (options.nationality) {
@@ -112,7 +130,7 @@ export function generateRider(
 
   const firstName = pick(rng, FIRST_NAMES_BY_NATION[nationality]);
   const lastName = pick(rng, LAST_NAMES_BY_NATION[nationality]);
-  const skills = rollSkillsForRarity(rng, rarity);
+  const skills = rollSkills(rng, rarity, archetype);
   // Leadership and consistency rolled independently — common can have 90 leadership.
   const leadership = randInt(rng, 30, 99);
   const consistency = randInt(rng, 40, 95);
@@ -120,11 +138,8 @@ export function generateRider(
   // Age: if forced, use forcedAge; otherwise rookie (20)
   const age = options.forcedAge ?? randInt(rng, 20, 21);
   const yearsAlreadyIn = age - 20;
-  // Career length 9-12. For an older seeded rider, ensure they have at least
-  // 1 year remaining (else they'd already be retired in year 1).
   const minLength = Math.max(9, yearsAlreadyIn + 1);
   const careerLength = Math.min(12, randInt(rng, minLength, 12));
-  // Rookie at age 20-21. So careerStartYear = currentYear - (age - 20).
   const careerStartYear = currentYear - yearsAlreadyIn;
 
   return {
@@ -132,13 +147,14 @@ export function generateRider(
     name: `${firstName} ${lastName}`,
     nationality,
     rarity,
+    archetype,
     skills,
     leadership,
     consistency,
     careerStartYear,
     careerLength,
     age,
-    teamId: '', // assigned later
+    teamId: '',
     phase: computePhase(age, careerStartYear, careerLength, currentYear),
     retired: false,
     history: [],

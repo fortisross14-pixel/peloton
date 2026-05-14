@@ -1,5 +1,5 @@
 import { useGame } from '../state/store';
-import { SKILL_KEYS, SKILL_LABELS } from '../types';
+import { SKILL_KEYS, SKILL_LABELS, ARCHETYPE_LABELS, ARCHETYPE_TAGLINES } from '../types';
 import { Flag } from '../utils/flags';
 import { eventName, terrainLabel } from '../utils/eventNames';
 import type { Rider } from '../types';
@@ -50,6 +50,12 @@ export function RiderDetailView() {
           <div className="text-right">
             <div className={`text-sm uppercase tracking-widest font-bold rarity-${rider.rarity}`}>
               {rider.rarity}
+            </div>
+            <div className="font-display text-lg font-bold">
+              {ARCHETYPE_LABELS[rider.archetype]}
+            </div>
+            <div className="font-body italic text-xs opacity-60 mt-0.5">
+              {ARCHETYPE_TAGLINES[rider.archetype]}
             </div>
             <div className="font-mono text-xs opacity-60 mt-1">
               Age {rider.age} · {rider.phase} · Year {Math.max(0, yearsIn) + 1}/{rider.careerLength}

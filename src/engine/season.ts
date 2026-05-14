@@ -342,10 +342,15 @@ function finishRace(universe: Universe): void {
   );
   const sortedByYouth = race.gc.filter((r) => r.isYoung);
 
+  // Only award classification jerseys if someone actually scored.
+  // 1-day flat classics have no mountain stages, so no KOM jersey.
+  const mountainAwarded = (sortedByMountain[0]?.mountainClassification ?? 0) > 0;
+  const pointsAwarded = (sortedByPoints[0]?.pointsClassification ?? 0) > 0;
+
   const jerseys = {
     gc: race.gc[0]?.riderId ?? '',
-    points: sortedByPoints[0]?.riderId ?? '',
-    mountain: sortedByMountain[0]?.riderId ?? '',
+    points: pointsAwarded ? sortedByPoints[0].riderId : '',
+    mountain: mountainAwarded ? sortedByMountain[0].riderId : '',
     youth: sortedByYouth[0]?.riderId ?? null,
     teamWinnerId: race.teamGc[0]?.teamId ?? '',
   };
