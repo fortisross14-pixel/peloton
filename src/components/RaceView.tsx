@@ -85,10 +85,10 @@ function LiveRace({
   onSelectRider: (id: string) => void;
   onSelectTeam: (id: string) => void;
 }) {
-  // Track which step boundary we're showing as "current run".
-  // When a new step begins (currentStep changes), start the auto-play loop.
+  // Track which step has been "started" by the user.
+  // On mount, step 0 starts automatically. Subsequent steps require a click.
   const [isAutoPlaying, setIsAutoPlaying] = useState(false);
-  const lastStepStarted = useRef<number>(-1);
+  const startedSteps = useRef<Set<number>>(new Set());
   const intervalRef = useRef<number | null>(null);
   const universe = useGame.getState().universe!;
 
@@ -98,15 +98,15 @@ function LiveRace({
   const stagesDoneInStep = race.stageResults.length - startStageOfCurrentStep;
   const stagesLeftInStep = Math.max(0, stagesInThisStep - stagesDoneInStep);
 
-  // Auto-start: when entering a fresh step (no stages of this step run yet)
-  // and we haven't auto-played this step yet, begin the loop.
+  // Auto-start the FIRST step only — once. Subsequent steps wait for click.
   useEffect(() => {
     if (
-      lastStepStarted.current !== race.currentStep &&
+      race.currentStep === 0 &&
       stagesDoneInStep === 0 &&
-      stagesInThisStep > 0
+      stagesInThisStep > 0 &&
+      !startedSteps.current.has(0)
     ) {
-      lastStepStarted.current = race.currentStep;
+      startedSteps.current.add(0);
       setIsAutoPlaying(true);
     }
   }, [race.currentStep, stagesDoneInStep, stagesInThisStep]);
@@ -125,6 +125,11 @@ function LiveRace({
       if (intervalRef.current) window.clearTimeout(intervalRef.current);
     };
   }, [isAutoPlaying, stagesLeftInStep, onSimulateStage]);
+
+  const startNextStep = () => {
+    startedSteps.current.add(race.currentStep);
+    setIsAutoPlaying(true);
+  };
 
   const latestStage: StageResult | undefined = race.stageResults[race.stageResults.length - 1];
 
@@ -159,7 +164,7 @@ function LiveRace({
             </button>
           )}
           {!isAutoPlaying && stagesLeftInStep === 0 && race.currentStep < stepsInRace && (
-            <button className="btn-vintage" onClick={() => onSimulateStage()}>
+            <button className="btn-vintage" onClick={startNextStep}>
               Next Step ▸
             </button>
           )}
@@ -215,6 +220,7 @@ function LiveRace({
           <div className="space-y-3">
             <JerseyLeaderCard
               jerseyClass="jersey-green"
+              code="PTS"
               label="Points · Sprinter"
               riderId={pointsLeader?.riderId}
               detail={pointsLeader ? `${pointsLeader.pointsClassification} pts` : ''}
@@ -222,6 +228,7 @@ function LiveRace({
             />
             <JerseyLeaderCard
               jerseyClass="jersey-polka"
+              code="KOM"
               label="Mountain · KOM"
               riderId={mountainLeader?.riderId}
               detail={mountainLeader ? `${mountainLeader.mountainClassification} pts` : ''}
@@ -229,6 +236,7 @@ function LiveRace({
             />
             <JerseyLeaderCard
               jerseyClass="jersey-white"
+              code="YTH"
               label="Best Young Rider"
               riderId={youthLeader?.riderId}
               detail={youthLeader ? formatGap(youthLeader.gapSeconds) : ''}
@@ -350,12 +358,14 @@ function pickLeader(
 
 function JerseyLeaderCard({
   jerseyClass,
+  code,
   label,
   riderId,
   detail,
   onSelectRider,
 }: {
   jerseyClass: string;
+  code: string;
   label: string;
   riderId: string | undefined;
   detail: string;
@@ -366,8 +376,8 @@ function JerseyLeaderCard({
   const t = r ? universe.teams[r.teamId] : null;
   return (
     <div className="flex items-center gap-3">
-      <div className={`${jerseyClass} w-10 h-10 flex items-center justify-center shrink-0`}>
-        <span className="font-display font-bold text-lg">1</span>
+      <div className={`${jerseyClass} w-12 h-12 flex items-center justify-center shrink-0`}>
+        <span className="font-sans tracking-widest text-[11px] font-bold">{code}</span>
       </div>
       <div className="flex-1 min-w-0">
         <div className="font-sans tracking-widest text-[10px] opacity-60 uppercase">{label}</div>
@@ -507,18 +517,21 @@ function Results({
           <div className="space-y-3">
             <FinalJersey
               jerseyClass="jersey-yellow"
+              code="GC"
               label="GC Winner"
               riderId={jerseys.gc}
               onSelectRider={onSelectRider}
             />
             <FinalJersey
               jerseyClass="jersey-green"
+              code="PTS"
               label="Points · Sprinter"
               riderId={jerseys.points}
               onSelectRider={onSelectRider}
             />
             <FinalJersey
               jerseyClass="jersey-polka"
+              code="KOM"
               label="Mountain · KOM"
               riderId={jerseys.mountain}
               onSelectRider={onSelectRider}
@@ -526,6 +539,7 @@ function Results({
             {jerseys.youth && (
               <FinalJersey
                 jerseyClass="jersey-white"
+                code="YTH"
                 label="Best Young Rider"
                 riderId={jerseys.youth}
                 onSelectRider={onSelectRider}
@@ -605,11 +619,13 @@ function Results({
 
 function FinalJersey({
   jerseyClass,
+  code,
   label,
   riderId,
   onSelectRider,
 }: {
   jerseyClass: string;
+  code: string;
   label: string;
   riderId: string | null | undefined;
   onSelectRider: (id: string) => void;
@@ -621,8 +637,8 @@ function FinalJersey({
   if (!r) return null;
   return (
     <div className="flex items-center gap-3">
-      <div className={`${jerseyClass} w-10 h-10 flex items-center justify-center shrink-0`}>
-        <span className="font-display font-bold text-lg">1</span>
+      <div className={`${jerseyClass} w-12 h-12 flex items-center justify-center shrink-0`}>
+        <span className="font-sans tracking-widest text-[11px] font-bold">{code}</span>
       </div>
       <div className="flex-1 min-w-0">
         <div className="font-sans tracking-widest text-[10px] opacity-60 uppercase">{label}</div>
