@@ -1,5 +1,5 @@
 import { useGame } from '../state/store';
-import { flagFor } from '../utils/flags';
+import { Flag } from '../utils/flags';
 import { formatGap } from '../utils/random';
 import type { CompletedEventResult } from '../types';
 
@@ -143,7 +143,7 @@ function PodiumCell({
   return (
     <div className="flex items-baseline gap-1.5 leading-tight">
       <span className={`font-mono text-xs ${color}`}>{pos}.</span>
-      <span className="text-xs leading-none">{flagFor(r.nationality)}</span>
+      <span className="text-xs leading-none"><Flag code={r.nationality} /></span>
       <button
         onClick={() => onClickRider(riderId)}
         className="font-body text-xs hover:underline truncate"
@@ -172,7 +172,7 @@ function JerseyCell({
         onClick={() => onClick(riderId)}
         className="flex items-center gap-1 hover:underline text-xs font-body"
       >
-        <span className="leading-none">{flagFor(r.nationality)}</span>
+        <span className="leading-none"><Flag code={r.nationality} /></span>
         <span className="truncate">{r.name}</span>
       </button>
     </td>

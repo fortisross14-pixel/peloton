@@ -1,11 +1,18 @@
 import { create } from 'zustand';
 import type { Universe } from '../types';
 import { generateUniverse } from '../data/generators';
-import { startRace, simulateNextStep, dismissRace, isSeasonOver } from '../engine/season';
+import {
+  startRace,
+  simulateNextStep,
+  simulateOneStage,
+  stagesInCurrentStep,
+  dismissRace,
+  isSeasonOver,
+} from '../engine/season';
 import { endSeason } from '../engine/offseason';
 
-const STORAGE_KEY = 'peloton.v3';
-const LEGACY_KEYS = ['peloton.v1', 'peloton.v2'];
+const STORAGE_KEY = 'peloton.v4';
+const LEGACY_KEYS = ['peloton.v1', 'peloton.v2', 'peloton.v3'];
 
 interface GameStore {
   universe: Universe | null;
@@ -20,6 +27,8 @@ interface GameStore {
 
   startActiveRace: () => void;
   simulateStep: () => void;
+  simulateOneStage: () => void;
+  stagesRemainingInStep: () => number;
   dismissActiveRace: () => void;
   endSeasonAndAdvance: () => void;
 
@@ -116,6 +125,20 @@ export const useGame = create<GameStore>((set, get) => ({
     simulateNextStep(u);
     persist(u);
     set({ universe: { ...u } });
+  },
+
+  simulateOneStage: () => {
+    const u = get().universe;
+    if (!u) return;
+    simulateOneStage(u);
+    persist(u);
+    set({ universe: { ...u } });
+  },
+
+  stagesRemainingInStep: () => {
+    const u = get().universe;
+    if (!u || !u.season.activeRace) return 0;
+    return stagesInCurrentStep(u);
   },
 
   dismissActiveRace: () => {

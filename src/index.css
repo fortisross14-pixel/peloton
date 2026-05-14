@@ -119,3 +119,33 @@ body {
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-track { background: #e8dcc0; }
 ::-webkit-scrollbar-thumb { background: #1a1814; }
+
+/* Flag rendering — Noto Color Emoji as primary so Chrome/Windows
+   shows proper flags instead of region letter fallback. */
+.flag {
+  font-family: 'Noto Color Emoji', 'Apple Color Emoji', 'Segoe UI Emoji', sans-serif;
+  font-style: normal;
+  line-height: 1;
+  display: inline-block;
+}
+
+/* Stage-by-stage GC chart */
+.gc-chart-line {
+  fill: none;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.gc-chart-axis {
+  stroke: rgba(26, 24, 20, 0.3);
+  stroke-width: 1;
+}
+.gc-chart-grid {
+  stroke: rgba(26, 24, 20, 0.08);
+  stroke-width: 1;
+}
+.gc-chart-label {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  fill: rgba(26, 24, 20, 0.6);
+}

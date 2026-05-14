@@ -1,330 +1,207 @@
+import { useEffect, useRef, useState } from 'react';
 import { useGame } from '../state/store';
 import { formatTime, formatGap } from '../utils/random';
-import { flagFor } from '../utils/flags';
-import type { CalendarEvent, StageResult } from '../types';
+import { Flag } from '../utils/flags';
+import { terrainLabel } from '../utils/eventNames';
+import type { CalendarEvent, StageResult, RaceClassification } from '../types';
+
+const STAGE_TICK_MS = 1000;
 
 export function RaceView() {
   const universe = useGame((s) => s.universe);
-  const simulateStep = useGame((s) => s.simulateStep);
-  const dismissActiveRace = useGame((s) => s.dismissActiveRace);
+  const simulateOneStage = useGame((s) => s.simulateOneStage);
+  const dismissRace = useGame((s) => s.dismissActiveRace);
+  const setView = useGame((s) => s.setView);
   const selectRider = useGame((s) => s.selectRider);
-  if (!universe) return null;
+  const selectTeam = useGame((s) => s.selectTeam);
 
-  const race = universe.season.activeRace;
-  if (!race) {
+  if (!universe || !universe.season.activeRace) {
     return (
       <div className="pt-12 text-center">
-        <div className="font-display text-2xl mb-3">No race in progress.</div>
-        <div className="opacity-60">Open the calendar to start the next event.</div>
+        <div className="font-display text-2xl mb-3">No active race</div>
+        <button className="btn-vintage" onClick={() => setView('calendar')}>
+          Back to calendar
+        </button>
       </div>
     );
   }
 
-  const event = universe.season.calendar.find((e) => e.id === race.eventId)!;
+  const event = universe.season.calendar[universe.season.currentEventIndex];
+  const race = universe.season.activeRace;
 
-  // Stages already simulated, grouped by step.
-  const stagesPerStep = Math.ceil(event.stages.length / event.stepsCount);
-  const stepGroups: StageResult[][] = [];
-  for (let s = 0; s < race.currentStep; s++) {
-    const start = s * stagesPerStep;
-    const end = Math.min(start + stagesPerStep, event.stages.length);
-    stepGroups.push(race.stageResults.slice(start, end));
+  // If finished, render the results screen.
+  if (race.finished) {
+    return (
+      <Results
+        race={race}
+        event={event}
+        onDone={() => {
+          dismissRace();
+          setView('calendar');
+        }}
+        onSelectRider={(id) => {
+          selectRider(id);
+          setView('rider-detail');
+        }}
+        onSelectTeam={(id) => {
+          selectTeam(id);
+          setView('team-detail');
+        }}
+      />
+    );
   }
 
   return (
-    <div className="pt-8">
-      {/* Race headline */}
-      <div className="flex items-end justify-between flex-wrap gap-4 mb-6">
-        <div>
-          <div className="font-sans tracking-[0.3em] text-xs text-rouge">{event.country} · {event.category.replace('-', ' ').toUpperCase()}</div>
-          <div className="font-display font-black text-5xl leading-none mt-1">{event.name}</div>
-          <div className="font-body italic opacity-70 mt-1">
-            {event.stages.length} stages · {race.participants.length} starters
-          </div>
-        </div>
-        <div className="text-right font-mono">
-          <div className="text-xs opacity-60 tracking-widest">PROGRESS</div>
-          <div className="text-3xl">
-            {race.currentStep} <span className="opacity-50">/ {race.totalSteps}</span>
-          </div>
-        </div>
-      </div>
-
-      {/* Step blocks */}
-      <div className="space-y-8">
-        {stepGroups.map((stages, stepIdx) => (
-          <StepBlock
-            key={stepIdx}
-            stepNumber={stepIdx + 1}
-            stages={stages}
-            event={event}
-            isLatest={stepIdx === stepGroups.length - 1}
-            gcSnapshot={
-              stepIdx === stepGroups.length - 1 ? race.gc.slice(0, 10) : null
-            }
-            teamSnapshot={
-              stepIdx === stepGroups.length - 1 ? race.teamGc.slice(0, 3) : null
-            }
-            onSelectRider={selectRider}
-          />
-        ))}
-      </div>
-
-      {/* End of race wrap-up */}
-      {race.finished && (
-        <FinalResults race={race} event={event} onSelectRider={selectRider} />
-      )}
-
-      {/* Action bar */}
-      <div className="mt-10 flex justify-between items-center">
-        <button
-          className="btn-vintage outline"
-          onClick={() => useGame.getState().setView('calendar')}
-        >
-          ← Back to Calendar
-        </button>
-        {!race.finished ? (
-          <button className="btn-vintage" onClick={simulateStep}>
-            Simulate Next Step →
-          </button>
-        ) : (
-          <button className="btn-vintage" onClick={dismissActiveRace}>
-            Continue Season →
-          </button>
-        )}
-      </div>
-    </div>
+    <LiveRace
+      race={race}
+      event={event}
+      onSimulateStage={simulateOneStage}
+      onSelectRider={(id) => {
+        selectRider(id);
+        setView('rider-detail');
+      }}
+      onSelectTeam={(id) => {
+        selectTeam(id);
+        setView('team-detail');
+      }}
+    />
   );
 }
 
 // ============================================================================
-
-function StepBlock({
-  stepNumber,
-  stages,
-  event,
-  isLatest,
-  gcSnapshot,
-  teamSnapshot,
-  onSelectRider,
-}: {
-  stepNumber: number;
-  stages: StageResult[];
-  event: CalendarEvent;
-  isLatest: boolean;
-  gcSnapshot: import('../types').RaceClassification[] | null;
-  teamSnapshot: import('../types').TeamClassification[] | null;
-  onSelectRider: (id: string) => void;
-}) {
-  const universe = useGame.getState().universe;
-  if (!universe) return null;
-  return (
-    <section className={`${isLatest ? 'animate-fade-in' : ''}`}>
-      <div className="flex items-center gap-4 mb-3">
-        <div className="font-sans tracking-[0.3em] text-xs opacity-50">STEP {stepNumber}</div>
-        <div className="flex-1 rule" />
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
-        {/* Stage podiums */}
-        <div className="lg:col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-4">
-          {stages.map((stage) => {
-            // Build a quick lookup of rider id -> finishing position in this stage
-            // so we can show how the GC top-3 fared on this specific stage.
-            const positionByRider = new Map<string, number>();
-            stage.finishers.forEach((f, i) => positionByRider.set(f.riderId, i + 1));
-            const topGcInThisStage = (gcSnapshot ?? []).slice(0, 3);
-
-            return (
-              <div key={stage.stageIndex} className="card-paper p-4 flex flex-col">
-                <div className="flex items-baseline justify-between mb-2">
-                  <div className="font-display font-bold">Stage {stage.stageIndex + 1}</div>
-                  <div className="font-sans tracking-widest text-[10px] opacity-50 uppercase">
-                    {stage.stageType.replace('-', ' ')}
-                  </div>
-                </div>
-                <div className="font-body italic text-xs opacity-60 mb-3 truncate">
-                  {stage.stageName.replace(/^Stage \d+ — /, '')} · {stage.distanceKm} km
-                </div>
-                <ol className="space-y-1 tabular text-sm">
-                  {stage.finishers.slice(0, 10).map((f, i) => {
-                    const r = universe.riders[f.riderId];
-                    const t = universe.teams[f.teamId];
-                    if (!r) return null;
-                    return (
-                      <li key={f.riderId} className="flex items-baseline gap-2">
-                        <span className="font-mono text-rouge font-bold w-5">{i + 1}</span>
-                        <span className="text-sm leading-none shrink-0">{flagFor(r.nationality)}</span>
-                        <button
-                          className="flex-1 text-left hover:underline truncate font-body"
-                          onClick={() => onSelectRider(f.riderId)}
-                        >
-                          {r.name}
-                        </button>
-                        <span className="font-mono text-[10px] opacity-50 uppercase shrink-0">{t?.shortName}</span>
-                        <span className="font-mono text-xs opacity-70 w-16 text-right">
-                          {i === 0 ? formatTime(f.timeSeconds) : formatGap(f.gapSeconds)}
-                        </span>
-                      </li>
-                    );
-                  })}
-                </ol>
-
-                {/* GC top-3 placement in this specific stage */}
-                {topGcInThisStage.length > 0 && (
-                  <div className="mt-4 pt-3 border-t border-ink/15">
-                    <div className="font-sans tracking-widest text-[9px] opacity-50 uppercase mb-1.5">
-                      GC Leaders Here
-                    </div>
-                    <ol className="space-y-0.5 tabular text-xs">
-                      {topGcInThisStage.map((row) => {
-                        const r = universe.riders[row.riderId];
-                        if (!r) return null;
-                        const stagePos = positionByRider.get(row.riderId) ?? null;
-                        const stageRow = stagePos ? stage.finishers[stagePos - 1] : null;
-                        return (
-                          <li key={row.riderId} className="flex items-baseline gap-2 opacity-80">
-                            <span className="font-mono w-5 opacity-60">{row.position}.</span>
-                            <span className="leading-none shrink-0">{flagFor(r.nationality)}</span>
-                            <span className="flex-1 truncate font-body">{r.name}</span>
-                            <span className="font-mono w-12 text-right">
-                              {stagePos ? `${stagePos}` : '—'}
-                            </span>
-                            <span className="font-mono w-16 text-right opacity-70">
-                              {stageRow
-                                ? (stagePos === 1
-                                    ? formatTime(stageRow.timeSeconds)
-                                    : formatGap(stageRow.gapSeconds))
-                                : ''}
-                            </span>
-                          </li>
-                        );
-                      })}
-                    </ol>
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
-
-        {/* Snapshot of GC + team after this step */}
-        {isLatest && gcSnapshot && (
-          <div className="space-y-4">
-            <div className="card-paper p-4">
-              <div className="flex items-baseline justify-between mb-3">
-                <div className="font-display font-bold text-lg">General Classification</div>
-                <div className="font-sans tracking-widest text-[10px] opacity-50 uppercase">After Step {stepNumber}</div>
-              </div>
-              <ol className="space-y-1.5 tabular text-sm">
-                {gcSnapshot.map((row) => {
-                  const r = universe.riders[row.riderId];
-                  const t = universe.teams[row.teamId];
-                  if (!r) return null;
-                  return (
-                    <li key={row.riderId} className="flex items-baseline gap-2">
-                      <span className={`font-mono w-5 ${row.position === 1 ? 'text-rouge font-bold' : 'opacity-60'}`}>
-                        {row.position}
-                      </span>
-                      <span className="leading-none shrink-0">{flagFor(r.nationality)}</span>
-                      <button
-                        className="flex-1 text-left hover:underline truncate font-body"
-                        onClick={() => onSelectRider(row.riderId)}
-                      >
-                        {r.name}
-                      </button>
-                      <span className="font-mono text-[10px] opacity-50 uppercase">{t?.shortName}</span>
-                      <span className="font-mono text-xs opacity-70 w-20 text-right">
-                        {row.position === 1 ? formatTime(row.totalTimeSeconds) : formatGap(row.gapSeconds)}
-                      </span>
-                    </li>
-                  );
-                })}
-              </ol>
-            </div>
-
-            {teamSnapshot && (
-              <div className="card-paper p-4">
-                <div className="flex items-baseline justify-between mb-3">
-                  <div className="font-display font-bold text-lg">Teams</div>
-                  <div className="font-sans tracking-widest text-[10px] opacity-50 uppercase">Top 3</div>
-                </div>
-                <ol className="space-y-1.5 tabular text-sm">
-                  {teamSnapshot.map((row) => {
-                    const t = universe.teams[row.teamId];
-                    if (!t) return null;
-                    return (
-                      <li key={row.teamId} className="flex items-baseline gap-2">
-                        <span className={`font-mono w-4 ${row.position === 1 ? 'text-rouge font-bold' : 'opacity-60'}`}>
-                          {row.position}
-                        </span>
-                        <span className="flex-1 truncate font-body">{t.name}</span>
-                        <span className="font-mono text-xs opacity-70">
-                          {row.position === 1 ? formatTime(row.totalTimeSeconds) : formatGap(row.gapSeconds)}
-                        </span>
-                      </li>
-                    );
-                  })}
-                </ol>
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-    </section>
-  );
-}
-
+// LIVE RACE — auto-plays stages one at a time, pauses between steps
 // ============================================================================
 
-function FinalResults({
+function LiveRace({
   race,
   event,
+  onSimulateStage,
   onSelectRider,
+  onSelectTeam,
 }: {
-  race: import('../types').RaceState;
+  race: any;
   event: CalendarEvent;
+  onSimulateStage: () => void;
   onSelectRider: (id: string) => void;
+  onSelectTeam: (id: string) => void;
 }) {
-  const universe = useGame.getState().universe;
-  if (!universe || !race.jerseys) return null;
-  const jerseys = race.jerseys;
-  const rider = (id: string) => universe.riders[id];
-  const team = (id: string) => universe.teams[id];
+  // Track which step boundary we're showing as "current run".
+  // When a new step begins (currentStep changes), start the auto-play loop.
+  const [isAutoPlaying, setIsAutoPlaying] = useState(false);
+  const lastStepStarted = useRef<number>(-1);
+  const intervalRef = useRef<number | null>(null);
+  const universe = useGame.getState().universe!;
+
+  const stepsInRace = race.totalSteps;
+  const startStageOfCurrentStep = stageStartIndexForStep(event, race.currentStep);
+  const stagesInThisStep = stagesInStepFor(event, race.currentStep);
+  const stagesDoneInStep = race.stageResults.length - startStageOfCurrentStep;
+  const stagesLeftInStep = Math.max(0, stagesInThisStep - stagesDoneInStep);
+
+  // Auto-start: when entering a fresh step (no stages of this step run yet)
+  // and we haven't auto-played this step yet, begin the loop.
+  useEffect(() => {
+    if (
+      lastStepStarted.current !== race.currentStep &&
+      stagesDoneInStep === 0 &&
+      stagesInThisStep > 0
+    ) {
+      lastStepStarted.current = race.currentStep;
+      setIsAutoPlaying(true);
+    }
+  }, [race.currentStep, stagesDoneInStep, stagesInThisStep]);
+
+  // Run the per-stage tick while auto-playing
+  useEffect(() => {
+    if (!isAutoPlaying) return;
+    if (stagesLeftInStep === 0) {
+      setIsAutoPlaying(false);
+      return;
+    }
+    intervalRef.current = window.setTimeout(() => {
+      onSimulateStage();
+    }, STAGE_TICK_MS);
+    return () => {
+      if (intervalRef.current) window.clearTimeout(intervalRef.current);
+    };
+  }, [isAutoPlaying, stagesLeftInStep, onSimulateStage]);
+
+  const latestStage: StageResult | undefined = race.stageResults[race.stageResults.length - 1];
+
+  // Jersey leaders mid-race
+  const pointsLeader = pickLeader(race.gc, 'pointsClassification');
+  const mountainLeader = pickLeader(race.gc, 'mountainClassification');
+  const youthLeader = race.gc.filter((r: RaceClassification) => r.isYoung)[0];
+  const teamLeader = race.teamGc?.[0];
 
   return (
-    <section className="mt-10 animate-stamp">
-      <div className="border-y-2 border-ink py-6 my-2">
-        <div className="text-center">
-          <div className="font-sans tracking-[0.4em] text-xs text-rouge mb-1">RACE CONCLUDED</div>
-          <div className="font-display font-black text-3xl">Final Classification</div>
+    <div className="pt-6">
+      {/* Header */}
+      <div className="mb-5 flex items-end justify-between flex-wrap gap-3">
+        <div>
+          <div className="font-sans tracking-[0.3em] text-xs opacity-60">
+            {event.shortName} · STEP {race.currentStep + 1} OF {stepsInRace}
+          </div>
+          <div className="font-display font-black text-4xl leading-none">{event.name}</div>
+          <div className="font-body italic opacity-70 mt-1">
+            Stage {race.stageResults.length} of {event.stages.length}
+            {isAutoPlaying && stagesLeftInStep > 0 && (
+              <span className="ml-3 text-rouge font-bold">
+                ● live · {stagesLeftInStep} more this step
+              </span>
+            )}
+          </div>
+        </div>
+        <div className="flex gap-2">
+          {!isAutoPlaying && stagesLeftInStep > 0 && (
+            <button className="btn-vintage" onClick={() => setIsAutoPlaying(true)}>
+              Resume Step
+            </button>
+          )}
+          {!isAutoPlaying && stagesLeftInStep === 0 && race.currentStep < stepsInRace && (
+            <button className="btn-vintage" onClick={() => onSimulateStage()}>
+              Next Step ▸
+            </button>
+          )}
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-6">
-        {/* Top 10 GC */}
-        <div className="card-paper p-5">
-          <div className="font-display font-bold text-lg mb-3">General Classification · Top 10</div>
-          <ol className="space-y-1.5 tabular">
-            {race.gc.slice(0, 10).map((row) => {
-              const r = rider(row.riderId);
-              const t = team(row.teamId);
+      {/* Three-column layout */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        {/* LEFT: General Classification (top 10) */}
+        <div className="card-paper p-4">
+          <div className="flex items-baseline justify-between mb-3">
+            <div className="font-display font-bold text-lg">General Classification</div>
+            <div className="font-sans tracking-widest text-[10px] opacity-50">
+              AFTER {race.stageResults.length}
+            </div>
+          </div>
+          <ol className="space-y-1 tabular text-sm">
+            {race.gc.slice(0, 10).map((row: RaceClassification, i: number) => {
+              const r = universe.riders[row.riderId];
+              const t = universe.teams[row.teamId];
               if (!r) return null;
               return (
                 <li key={row.riderId} className="flex items-baseline gap-2">
-                  <span className={`font-mono w-5 ${row.position <= 3 ? 'text-rouge font-bold' : 'opacity-60'}`}>
-                    {row.position}
+                  <span
+                    className={`font-mono w-5 ${
+                      i === 0 ? 'text-rouge font-bold' : 'opacity-60'
+                    }`}
+                  >
+                    {i + 1}
                   </span>
-                  <span className="leading-none shrink-0">{flagFor(r.nationality)}</span>
+                  <Flag code={r.nationality} />
                   <button
-                    className="flex-1 text-left hover:underline font-body truncate"
+                    className="flex-1 text-left hover:underline truncate font-body"
                     onClick={() => onSelectRider(row.riderId)}
                   >
                     {r.name}
                   </button>
-                  <span className="font-mono text-[10px] opacity-50 uppercase">{t?.shortName}</span>
-                  <span className="font-mono text-xs w-24 text-right">
-                    {row.position === 1 ? formatTime(row.totalTimeSeconds) : formatGap(row.gapSeconds)}
+                  <span className="font-mono text-[10px] opacity-50 uppercase">
+                    {t?.shortName}
+                  </span>
+                  <span className="font-mono text-xs opacity-70 w-16 text-right">
+                    {i === 0 ? formatTime(row.totalTimeSeconds) : formatGap(row.gapSeconds)}
                   </span>
                 </li>
               );
@@ -332,119 +209,614 @@ function FinalResults({
           </ol>
         </div>
 
-        {/* Jerseys */}
-        <div className="space-y-3">
-          {event.awardsJerseys ? (
-            <>
-              <JerseyRow
-                jersey="yellow"
-                title="General Classification"
-                riderName={rider(jerseys.gc)?.name}
-                teamName={team(rider(jerseys.gc)?.teamId ?? '')?.name}
-                onClick={() => onSelectRider(jerseys.gc)}
-              />
-              <JerseyRow
-                jersey="green"
-                title="Points · Sprinter"
-                riderName={rider(jerseys.points)?.name}
-                teamName={team(rider(jerseys.points)?.teamId ?? '')?.name}
-                onClick={() => onSelectRider(jerseys.points)}
-              />
-              <JerseyRow
-                jersey="polka"
-                title="Mountain · King of the Mountains"
-                riderName={rider(jerseys.mountain)?.name}
-                teamName={team(rider(jerseys.mountain)?.teamId ?? '')?.name}
-                onClick={() => onSelectRider(jerseys.mountain)}
-              />
-              {jerseys.youth && (
-                <JerseyRow
-                  jersey="white"
-                  title="Youth · Best Young Rider"
-                  riderName={rider(jerseys.youth)?.name}
-                  teamName={team(rider(jerseys.youth)?.teamId ?? '')?.name}
-                  onClick={() => onSelectRider(jerseys.youth!)}
-                />
-              )}
-              <div className="card-paper p-3 flex items-center gap-3">
-                <div className="font-sans tracking-widest text-[10px] uppercase bg-ink text-paper px-2 py-1">
-                  Team
+        {/* MIDDLE: Jersey leaders */}
+        <div className="card-paper p-4">
+          <div className="font-display font-bold text-lg mb-3">Jersey Leaders</div>
+          <div className="space-y-3">
+            <JerseyLeaderCard
+              jerseyClass="jersey-green"
+              label="Points · Sprinter"
+              riderId={pointsLeader?.riderId}
+              detail={pointsLeader ? `${pointsLeader.pointsClassification} pts` : ''}
+              onSelectRider={onSelectRider}
+            />
+            <JerseyLeaderCard
+              jerseyClass="jersey-polka"
+              label="Mountain · KOM"
+              riderId={mountainLeader?.riderId}
+              detail={mountainLeader ? `${mountainLeader.mountainClassification} pts` : ''}
+              onSelectRider={onSelectRider}
+            />
+            <JerseyLeaderCard
+              jerseyClass="jersey-white"
+              label="Best Young Rider"
+              riderId={youthLeader?.riderId}
+              detail={youthLeader ? formatGap(youthLeader.gapSeconds) : ''}
+              onSelectRider={onSelectRider}
+            />
+            {teamLeader && (
+              <div className="border-t border-ink/10 pt-3">
+                <div className="font-sans tracking-widest text-[10px] opacity-60 uppercase mb-1.5">
+                  Team Classification
                 </div>
-                <div className="flex-1">
-                  <div className="font-body font-bold">{team(jerseys.teamWinnerId)?.name}</div>
-                  <div className="font-mono text-xs opacity-60">Team Classification Winner</div>
+                <button
+                  onClick={() => onSelectTeam(teamLeader.teamId)}
+                  className="flex items-center gap-2 hover:underline"
+                >
+                  <span className="text-xl">{universe.teams[teamLeader.teamId]?.emoji}</span>
+                  <span className="font-body font-bold">
+                    {universe.teams[teamLeader.teamId]?.name}
+                  </span>
+                </button>
+                <div className="font-mono text-xs opacity-60 mt-0.5">
+                  {formatTime(teamLeader.totalTimeSeconds)}
                 </div>
               </div>
+            )}
+          </div>
+        </div>
+
+        {/* RIGHT: Latest stage result */}
+        <div className="card-paper p-4">
+          {latestStage ? (
+            <>
+              <div className="flex items-baseline justify-between mb-1">
+                <div className="font-display font-bold text-lg">
+                  Stage {latestStage.stageIndex + 1}
+                </div>
+                <div className="font-sans tracking-widest text-[10px] opacity-50 uppercase">
+                  {terrainLabel(latestStage.stageType)}
+                </div>
+              </div>
+              <div className="font-body italic text-xs opacity-60 mb-3 truncate">
+                {latestStage.stageName.replace(/^Stage \d+ — /, '')} · {latestStage.distanceKm} km
+              </div>
+              <ol className="space-y-1 tabular text-sm">
+                {latestStage.finishers.slice(0, 10).map((f, i) => {
+                  const r = universe.riders[f.riderId];
+                  const t = universe.teams[f.teamId];
+                  if (!r) return null;
+                  return (
+                    <li key={f.riderId} className="flex items-baseline gap-2">
+                      <span
+                        className={`font-mono w-5 ${
+                          i === 0 ? 'text-rouge font-bold' : 'opacity-60'
+                        }`}
+                      >
+                        {i + 1}
+                      </span>
+                      <Flag code={r.nationality} />
+                      <button
+                        className="flex-1 text-left hover:underline truncate font-body"
+                        onClick={() => onSelectRider(f.riderId)}
+                      >
+                        {r.name}
+                      </button>
+                      <span className="font-mono text-[10px] opacity-50 uppercase">
+                        {t?.shortName}
+                      </span>
+                      <span className="font-mono text-xs opacity-70 w-16 text-right">
+                        {i === 0 ? formatTime(f.timeSeconds) : formatGap(f.gapSeconds)}
+                      </span>
+                    </li>
+                  );
+                })}
+              </ol>
             </>
           ) : (
-            <div className="card-paper p-5">
-              <div className="font-display font-bold text-lg mb-2">Race Winner</div>
-              <button
-                onClick={() => onSelectRider(jerseys.gc)}
-                className="font-display text-2xl hover:underline"
-              >
-                {rider(jerseys.gc)?.name}
-              </button>
-              <div className="font-body italic opacity-70 mt-1">
-                {team(rider(jerseys.gc)?.teamId ?? '')?.name}
-              </div>
+            <div className="font-body italic opacity-60 py-8 text-center">
+              Awaiting first stage…
             </div>
           )}
         </div>
       </div>
 
-      {/* Stage win count */}
-      <div className="mt-6 card-paper p-5">
-        <div className="font-display font-bold text-lg mb-3">Stage Wins · This Race</div>
-        <div className="flex flex-wrap gap-3">
-          {Object.entries(race.stageWinsByRider)
-            .sort((a, b) => b[1] - a[1])
-            .map(([rid, count]) => {
-              const r = rider(rid);
-              if (!r) return null;
-              return (
-                <button
-                  key={rid}
-                  className="font-body hover:underline flex items-center gap-1.5"
-                  onClick={() => onSelectRider(rid)}
-                >
-                  <span>{flagFor(r.nationality)}</span>
-                  <span className="font-bold">{r.name}</span>
-                  <span className="font-mono text-rouge">×{count}</span>
-                </button>
-              );
-            })}
+      {/* Stage progress bar — visual hint of the journey */}
+      <div className="mt-6 card-paper p-3">
+        <div className="font-sans tracking-widest text-[10px] opacity-60 uppercase mb-2">
+          Race Progress
+        </div>
+        <div className="flex gap-0.5">
+          {event.stages.map((s, i) => {
+            const done = i < race.stageResults.length;
+            const inCurrentStep =
+              i >= startStageOfCurrentStep && i < startStageOfCurrentStep + stagesInThisStep;
+            return (
+              <div
+                key={i}
+                className={`flex-1 h-3 ${
+                  done
+                    ? 'bg-rouge'
+                    : inCurrentStep
+                    ? 'bg-rouge/30 border border-rouge'
+                    : 'bg-paper-dark border border-ink/20'
+                }`}
+                title={`Stage ${i + 1} — ${s.type}${done ? ' ✓' : ''}`}
+              />
+            );
+          })}
         </div>
       </div>
-    </section>
+    </div>
   );
 }
 
-function JerseyRow({
-  jersey,
-  title,
-  riderName,
-  teamName,
-  onClick,
+function pickLeader(
+  gc: RaceClassification[],
+  field: 'pointsClassification' | 'mountainClassification',
+): RaceClassification | undefined {
+  return [...gc].sort((a, b) => b[field] - a[field])[0];
+}
+
+function JerseyLeaderCard({
+  jerseyClass,
+  label,
+  riderId,
+  detail,
+  onSelectRider,
 }: {
-  jersey: 'yellow' | 'green' | 'polka' | 'white';
-  title: string;
-  riderName?: string;
-  teamName?: string;
-  onClick: () => void;
+  jerseyClass: string;
+  label: string;
+  riderId: string | undefined;
+  detail: string;
+  onSelectRider: (id: string) => void;
 }) {
-  const cls =
-    jersey === 'yellow' ? 'jersey-yellow' :
-    jersey === 'green' ? 'jersey-green' :
-    jersey === 'polka' ? 'jersey-polka' : 'jersey-white';
+  const universe = useGame.getState().universe!;
+  const r = riderId ? universe.riders[riderId] : null;
+  const t = r ? universe.teams[r.teamId] : null;
   return (
-    <div className="card-paper p-3 flex items-center gap-3">
-      <div className={`${cls} font-sans tracking-widest text-[10px] uppercase px-2 py-1`}>
-        {jersey === 'yellow' ? 'GC' : jersey === 'green' ? 'PTS' : jersey === 'polka' ? 'KOM' : 'Youth'}
+    <div className="flex items-center gap-3">
+      <div className={`${jerseyClass} w-10 h-10 flex items-center justify-center shrink-0`}>
+        <span className="font-display font-bold text-lg">1</span>
       </div>
       <div className="flex-1 min-w-0">
-        <button onClick={onClick} className="font-body font-bold hover:underline truncate block">{riderName ?? '—'}</button>
-        <div className="font-mono text-xs opacity-60 truncate">{title} · {teamName ?? ''}</div>
+        <div className="font-sans tracking-widest text-[10px] opacity-60 uppercase">{label}</div>
+        {r ? (
+          <button
+            onClick={() => onSelectRider(r.id)}
+            className="flex items-center gap-1.5 font-body font-bold hover:underline truncate w-full text-left"
+          >
+            <Flag code={r.nationality} />
+            <span className="truncate">{r.name}</span>
+          </button>
+        ) : (
+          <div className="font-body italic opacity-50 text-sm">—</div>
+        )}
+        <div className="font-mono text-xs opacity-60">
+          {t?.shortName} {detail && `· ${detail}`}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Match engine helpers (kept local to avoid importing engine into views).
+function stagesInStepFor(event: CalendarEvent, stepIndex: number): number {
+  const total = event.stages.length;
+  if (total === 21) return [5, 4, 4, 4, 4][stepIndex] ?? 0;
+  if (total === 8) return [4, 4][stepIndex] ?? 0;
+  if (total === 7) return [4, 3][stepIndex] ?? 0;
+  return total;
+}
+
+function stageStartIndexForStep(event: CalendarEvent, stepIndex: number): number {
+  let sum = 0;
+  for (let i = 0; i < stepIndex; i++) sum += stagesInStepFor(event, i);
+  return sum;
+}
+
+// ============================================================================
+// RESULTS SCREEN
+// ============================================================================
+
+function Results({
+  race,
+  event,
+  onDone,
+  onSelectRider,
+  onSelectTeam,
+}: {
+  race: any;
+  event: CalendarEvent;
+  onDone: () => void;
+  onSelectRider: (id: string) => void;
+  onSelectTeam: (id: string) => void;
+}) {
+  const universe = useGame.getState().universe!;
+  const jerseys = race.jerseys!;
+
+  // Stage win tally by rider
+  const stageWinEntries = Object.entries(race.stageWinsByRider as Record<string, number>)
+    .filter(([, count]) => (count as number) > 0)
+    .sort((a, b) => (b[1] as number) - (a[1] as number));
+
+  // Top 3 GC trajectory for the chart
+  const top3 = race.gc.slice(0, 3).map((r: RaceClassification) => r.riderId);
+  const hasMultipleStages = race.stageResults.length > 1;
+
+  return (
+    <div className="pt-6">
+      {/* Headline */}
+      <div className="border-2 border-ink p-6 mb-6 bg-paper">
+        <div className="font-sans tracking-[0.3em] text-xs opacity-60">
+          {event.shortName} · RESULTS
+        </div>
+        <div className="font-display font-black text-5xl leading-none mt-1">{event.name}</div>
+        <div className="mt-3 flex items-center gap-3">
+          <span className="font-sans tracking-widest text-xs opacity-60">WINNER</span>
+          {(() => {
+            const winnerR = universe.riders[jerseys.gc];
+            const winnerT = winnerR ? universe.teams[winnerR.teamId] : null;
+            if (!winnerR) return null;
+            return (
+              <button
+                onClick={() => onSelectRider(winnerR.id)}
+                className="font-display font-bold text-2xl hover:underline flex items-center gap-2"
+              >
+                <Flag code={winnerR.nationality} />
+                {winnerR.name}
+                <span className="font-mono text-sm opacity-60">
+                  {winnerT?.shortName}
+                </span>
+              </button>
+            );
+          })()}
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        {/* GC Top 10 */}
+        <div className="card-paper p-4 lg:col-span-1">
+          <div className="font-display font-bold text-lg mb-3">General Classification</div>
+          <ol className="space-y-1 tabular text-sm">
+            {race.gc.slice(0, 10).map((row: RaceClassification, i: number) => {
+              const r = universe.riders[row.riderId];
+              const t = universe.teams[row.teamId];
+              if (!r) return null;
+              return (
+                <li key={row.riderId} className="flex items-baseline gap-2">
+                  <span
+                    className={`font-mono w-5 ${
+                      i === 0 ? 'text-rouge font-bold' : 'opacity-60'
+                    }`}
+                  >
+                    {i + 1}
+                  </span>
+                  <Flag code={r.nationality} />
+                  <button
+                    className="flex-1 text-left hover:underline truncate font-body"
+                    onClick={() => onSelectRider(row.riderId)}
+                  >
+                    {r.name}
+                  </button>
+                  <span className="font-mono text-[10px] opacity-50 uppercase">
+                    {t?.shortName}
+                  </span>
+                  <span className="font-mono text-xs opacity-70 w-16 text-right">
+                    {i === 0 ? formatTime(row.totalTimeSeconds) : formatGap(row.gapSeconds)}
+                  </span>
+                </li>
+              );
+            })}
+          </ol>
+        </div>
+
+        {/* Jersey Winners + Team Winner */}
+        <div className="card-paper p-4">
+          <div className="font-display font-bold text-lg mb-3">Classifications</div>
+          <div className="space-y-3">
+            <FinalJersey
+              jerseyClass="jersey-yellow"
+              label="GC Winner"
+              riderId={jerseys.gc}
+              onSelectRider={onSelectRider}
+            />
+            <FinalJersey
+              jerseyClass="jersey-green"
+              label="Points · Sprinter"
+              riderId={jerseys.points}
+              onSelectRider={onSelectRider}
+            />
+            <FinalJersey
+              jerseyClass="jersey-polka"
+              label="Mountain · KOM"
+              riderId={jerseys.mountain}
+              onSelectRider={onSelectRider}
+            />
+            {jerseys.youth && (
+              <FinalJersey
+                jerseyClass="jersey-white"
+                label="Best Young Rider"
+                riderId={jerseys.youth}
+                onSelectRider={onSelectRider}
+              />
+            )}
+            {jerseys.teamWinnerId && (
+              <div className="border-t border-ink/10 pt-3">
+                <div className="font-sans tracking-widest text-[10px] opacity-60 uppercase mb-1">
+                  Best Team
+                </div>
+                <button
+                  onClick={() => onSelectTeam(jerseys.teamWinnerId)}
+                  className="flex items-center gap-2 hover:underline"
+                >
+                  <span className="text-xl">{universe.teams[jerseys.teamWinnerId]?.emoji}</span>
+                  <span className="font-body font-bold">
+                    {universe.teams[jerseys.teamWinnerId]?.name}
+                  </span>
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Stage Wins */}
+        <div className="card-paper p-4">
+          <div className="font-display font-bold text-lg mb-3">Stage Wins</div>
+          {stageWinEntries.length === 0 ? (
+            <div className="font-body italic opacity-50">—</div>
+          ) : (
+            <ol className="space-y-1.5 tabular text-sm">
+              {stageWinEntries.map(([rid, count]) => {
+                const r = universe.riders[rid];
+                if (!r) return null;
+                return (
+                  <li key={rid} className="flex items-baseline gap-2">
+                    <Flag code={r.nationality} />
+                    <button
+                      className="flex-1 text-left hover:underline truncate font-body"
+                      onClick={() => onSelectRider(rid)}
+                    >
+                      {r.name}
+                    </button>
+                    <span className="font-mono text-rouge font-bold">×{count}</span>
+                  </li>
+                );
+              })}
+            </ol>
+          )}
+        </div>
+      </div>
+
+      {/* Top-3 GC trajectory chart (only if multi-stage) */}
+      {hasMultipleStages && (
+        <div className="mt-6">
+          <div className="flex items-baseline gap-3 mb-3">
+            <div className="font-display font-bold text-xl">Top 3 · GC Trajectory</div>
+            <div className="flex-1 rule" />
+          </div>
+          <div className="card-paper p-4">
+            <GcTrajectoryChart
+              stageResults={race.stageResults}
+              top3RiderIds={top3}
+            />
+          </div>
+        </div>
+      )}
+
+      <div className="mt-8 flex justify-center">
+        <button className="btn-vintage" onClick={onDone}>
+          Continue Season ▸
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function FinalJersey({
+  jerseyClass,
+  label,
+  riderId,
+  onSelectRider,
+}: {
+  jerseyClass: string;
+  label: string;
+  riderId: string | null | undefined;
+  onSelectRider: (id: string) => void;
+}) {
+  const universe = useGame.getState().universe!;
+  if (!riderId) return null;
+  const r = universe.riders[riderId];
+  const t = r ? universe.teams[r.teamId] : null;
+  if (!r) return null;
+  return (
+    <div className="flex items-center gap-3">
+      <div className={`${jerseyClass} w-10 h-10 flex items-center justify-center shrink-0`}>
+        <span className="font-display font-bold text-lg">1</span>
+      </div>
+      <div className="flex-1 min-w-0">
+        <div className="font-sans tracking-widest text-[10px] opacity-60 uppercase">{label}</div>
+        <button
+          onClick={() => onSelectRider(r.id)}
+          className="flex items-center gap-1.5 font-body font-bold hover:underline truncate w-full text-left"
+        >
+          <Flag code={r.nationality} />
+          <span className="truncate">{r.name}</span>
+        </button>
+        <div className="font-mono text-xs opacity-60">{t?.shortName}</div>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
+// GC TRAJECTORY CHART — top 3 finishers' position after each stage (capped at 25)
+// ============================================================================
+
+const CHART_W = 760;
+const CHART_H = 280;
+const CHART_PADDING = { top: 20, right: 80, bottom: 30, left: 40 };
+const MAX_POSITION_DISPLAY = 25;
+
+const LINE_COLORS = ['#c89f1a', '#7a7a7a', '#9c6b3f']; // gold, silver, bronze
+
+function GcTrajectoryChart({
+  stageResults,
+  top3RiderIds,
+}: {
+  stageResults: StageResult[];
+  top3RiderIds: string[];
+}) {
+  const universe = useGame.getState().universe!;
+  const stageCount = stageResults.length;
+  if (stageCount === 0 || top3RiderIds.length === 0) return null;
+
+  // For each rider in top3, build their position-after-stage-N trajectory.
+  // Computing this requires re-deriving GC standings step by step from
+  // cumulative times in stage results.
+
+  // Cumulative time per rider per stage
+  const cumulativeTimeAfter: Record<string, number>[] = [];
+  const seen: Record<string, number> = {}; // rider -> running cum time
+  for (let s = 0; s < stageCount; s++) {
+    const sr = stageResults[s];
+    for (const f of sr.finishers) {
+      seen[f.riderId] = (seen[f.riderId] ?? 0) + f.timeSeconds;
+    }
+    cumulativeTimeAfter.push({ ...seen });
+  }
+
+  // For each stage, compute the position of each top-3 rider in GC
+  // (by sorting everyone by cumulative time and finding their rank).
+  const trajectories: { riderId: string; positions: (number | null)[] }[] = top3RiderIds.map(
+    (rid) => ({ riderId: rid, positions: [] }),
+  );
+
+  for (let s = 0; s < stageCount; s++) {
+    const cum = cumulativeTimeAfter[s];
+    const sorted = Object.entries(cum).sort((a, b) => a[1] - b[1]);
+    const posByRider = new Map<string, number>();
+    sorted.forEach(([rid], i) => posByRider.set(rid, i + 1));
+    for (const traj of trajectories) {
+      traj.positions.push(posByRider.get(traj.riderId) ?? null);
+    }
+  }
+
+  // Plot params
+  const innerW = CHART_W - CHART_PADDING.left - CHART_PADDING.right;
+  const innerH = CHART_H - CHART_PADDING.top - CHART_PADDING.bottom;
+  const xFor = (s: number) =>
+    CHART_PADDING.left +
+    (stageCount === 1 ? innerW / 2 : (s / (stageCount - 1)) * innerW);
+  const yFor = (pos: number | null) => {
+    if (pos === null) return CHART_PADDING.top + innerH; // bottom
+    const clamped = Math.min(pos, MAX_POSITION_DISPLAY);
+    return CHART_PADDING.top + ((clamped - 1) / (MAX_POSITION_DISPLAY - 1)) * innerH;
+  };
+
+  // Y gridlines at positions 1, 5, 10, 15, 20, 25
+  const yTicks = [1, 5, 10, 15, 20, 25];
+
+  return (
+    <div className="overflow-x-auto">
+      <svg viewBox={`0 0 ${CHART_W} ${CHART_H}`} className="w-full h-auto" preserveAspectRatio="xMidYMid meet">
+        {/* Y grid + labels */}
+        {yTicks.map((p) => (
+          <g key={p}>
+            <line
+              x1={CHART_PADDING.left}
+              x2={CHART_W - CHART_PADDING.right}
+              y1={yFor(p)}
+              y2={yFor(p)}
+              className="gc-chart-grid"
+            />
+            <text
+              x={CHART_PADDING.left - 6}
+              y={yFor(p) + 3}
+              textAnchor="end"
+              className="gc-chart-label"
+            >
+              {p}
+            </text>
+          </g>
+        ))}
+
+        {/* X axis labels (stage numbers) */}
+        {Array.from({ length: stageCount }, (_, i) => (
+          <text
+            key={i}
+            x={xFor(i)}
+            y={CHART_H - CHART_PADDING.bottom + 16}
+            textAnchor="middle"
+            className="gc-chart-label"
+          >
+            {i + 1}
+          </text>
+        ))}
+
+        {/* Y axis title */}
+        <text
+          x={10}
+          y={CHART_PADDING.top - 6}
+          className="gc-chart-label"
+          style={{ fontWeight: 700 }}
+        >
+          GC POS
+        </text>
+
+        {/* X axis title */}
+        <text
+          x={CHART_W / 2}
+          y={CHART_H - 4}
+          textAnchor="middle"
+          className="gc-chart-label"
+          style={{ fontWeight: 700 }}
+        >
+          STAGE
+        </text>
+
+        {/* Trajectory lines */}
+        {trajectories.map((traj, ti) => {
+          // Build the SVG path
+          const points = traj.positions
+            .map((p, i) => `${xFor(i)},${yFor(p)}`)
+            .join(' L ');
+          const path = `M ${points}`;
+          const color = LINE_COLORS[ti] ?? '#1a1814';
+          return (
+            <g key={traj.riderId}>
+              <path d={path} className="gc-chart-line" stroke={color} />
+              {/* Dots at each stage */}
+              {traj.positions.map((p, i) => (
+                <circle
+                  key={i}
+                  cx={xFor(i)}
+                  cy={yFor(p)}
+                  r={3}
+                  fill={color}
+                />
+              ))}
+              {/* End-of-line label */}
+              <text
+                x={xFor(stageCount - 1) + 6}
+                y={yFor(traj.positions[stageCount - 1]) + 4}
+                className="gc-chart-label"
+                style={{ fill: color, fontWeight: 700 }}
+              >
+                {universe.riders[traj.riderId]?.name.split(' ').pop() ?? '?'}
+              </text>
+            </g>
+          );
+        })}
+      </svg>
+
+      {/* Legend */}
+      <div className="flex flex-wrap gap-4 mt-3 font-body text-sm">
+        {trajectories.map((traj, ti) => {
+          const r = universe.riders[traj.riderId];
+          if (!r) return null;
+          return (
+            <div key={traj.riderId} className="flex items-center gap-2">
+              <span
+                className="inline-block w-6 h-0.5"
+                style={{ background: LINE_COLORS[ti] }}
+              />
+              <Flag code={r.nationality} />
+              <span className="font-bold">{r.name}</span>
+              <span className="opacity-50 font-mono text-xs">#{ti + 1}</span>
+            </div>
+          );
+        })}
       </div>
     </div>
   );

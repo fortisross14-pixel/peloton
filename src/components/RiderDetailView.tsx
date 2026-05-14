@@ -1,6 +1,6 @@
 import { useGame } from '../state/store';
 import { SKILL_KEYS, SKILL_LABELS } from '../types';
-import { flagFor } from '../utils/flags';
+import { Flag } from '../utils/flags';
 import { eventName, terrainLabel } from '../utils/eventNames';
 import type { Rider } from '../types';
 
@@ -33,7 +33,7 @@ export function RiderDetailView() {
         <div className="flex items-end justify-between flex-wrap gap-3">
           <div>
             <div className="font-sans tracking-widest text-xs opacity-60 flex items-center gap-2">
-              <span>{flagFor(rider.nationality)}</span>
+              <span><Flag code={rider.nationality} /></span>
               <span>{rider.nationality}</span>
               {rider.retired && <span className="ml-2 text-rouge">· RETIRED</span>}
             </div>

@@ -133,10 +133,45 @@ export function startRace(universe: Universe): void {
     gc: [],
     teamGc: [],
     currentStep: 0,
-    totalSteps: event.stepsCount,
+    totalSteps: totalStepsFor(event),
     stageWinsByRider: {},
     finished: false,
   };
+}
+
+/** How many stages are in step N for a given event? */
+function stagesInStep(event: { id: string; stages: { type: string }[] }, stepIndex: number): number {
+  const total = event.stages.length;
+  // Grand Tours (21 stages): 5 + 4 + 4 + 4 + 4 = 21
+  if (total === 21) {
+    return [5, 4, 4, 4, 4][stepIndex] ?? 0;
+  }
+  // 8-stage week race: 4 + 4 = 8
+  if (total === 8) {
+    return [4, 4][stepIndex] ?? 0;
+  }
+  // 7-stage week race: 4 + 3 = 7
+  if (total === 7) {
+    return [4, 3][stepIndex] ?? 0;
+  }
+  // Classics or anything single-stage: just one chunk equal to total
+  return total;
+}
+
+/** Total number of steps for the event */
+function totalStepsFor(event: { id: string; stages: { type: string }[] }): number {
+  const total = event.stages.length;
+  if (total === 21) return 5;
+  if (total === 8) return 2;
+  if (total === 7) return 2;
+  return 1;
+}
+
+/** How many stages have been simulated through the END of step N (inclusive)? */
+function cumulativeStagesAfterStep(event: { id: string; stages: { type: string }[] }, stepIndex: number): number {
+  let sum = 0;
+  for (let i = 0; i <= stepIndex; i++) sum += stagesInStep(event, i);
+  return sum;
 }
 
 export function simulateNextStep(universe: Universe): void {
@@ -145,10 +180,11 @@ export function simulateNextStep(universe: Universe): void {
   const event = universe.season.calendar[universe.season.currentEventIndex];
   if (!event) return;
 
-  // How many stages per step?
-  const stagesPerStep = Math.ceil(event.stages.length / event.stepsCount);
-  const startStage = race.currentStep * stagesPerStep;
-  const endStage = Math.min(startStage + stagesPerStep, event.stages.length);
+  const startStage = race.stageResults.length;
+  const endStage = Math.min(
+    cumulativeStagesAfterStep(event, race.currentStep),
+    event.stages.length,
+  );
 
   const rng = makeRng(
     universe.seed +
@@ -204,6 +240,89 @@ export function simulateNextStep(universe: Universe): void {
   if (race.currentStep >= race.totalSteps) {
     finishRace(universe);
   }
+}
+
+/**
+ * Simulate a single stage. Used by the UI's auto-play tick (one stage per
+ * second). Increments `currentStep` only when this stage is the last of its
+ * step. Triggers finishRace when the final stage of the race completes.
+ */
+export function simulateOneStage(universe: Universe): void {
+  const race = universe.season.activeRace;
+  if (!race || race.finished) return;
+  const event = universe.season.calendar[universe.season.currentEventIndex];
+  if (!event) return;
+
+  const stageIndex = race.stageResults.length;
+  if (stageIndex >= event.stages.length) return;
+
+  const rng = makeRng(
+    universe.seed +
+      universe.currentYear * 1000 +
+      hash(event.id) +
+      race.currentStep * 17 +
+      stageIndex,
+  );
+
+  const participantRiders = race.participants
+    .map((id) => universe.riders[id])
+    .filter(Boolean);
+  const ridersByTeam: Record<string, Rider[]> = {};
+  for (const r of participantRiders) {
+    if (!ridersByTeam[r.teamId]) ridersByTeam[r.teamId] = [];
+    ridersByTeam[r.teamId].push(r);
+  }
+
+  const stage = event.stages[stageIndex];
+  const result = simulateStage({
+    stage,
+    participants: participantRiders,
+    ridersByTeam,
+    teams: universe.teams,
+    directors: universe.directors,
+    currentYear: universe.currentYear,
+    rng,
+    stagesElapsed: stageIndex,
+    totalStagesInRace: event.stages.length,
+    raceCategory: event.category,
+    eventId: event.id,
+  });
+  result.stageIndex = stageIndex;
+  race.stageResults.push(result);
+
+  const winner = result.finishers[0]?.riderId;
+  if (winner) {
+    race.stageWinsByRider[winner] = (race.stageWinsByRider[winner] ?? 0) + 1;
+  }
+
+  // Rebuild classifications (also for jersey leaders mid-race)
+  const classifications = buildClassifications(
+    participantRiders,
+    race.stageResults,
+    universe.currentYear,
+  );
+  race.gc = classifications.gc;
+  race.teamGc = classifications.teamGc;
+
+  // Did this stage complete the current step? If so, advance step counter.
+  const completedAfterThisStep = cumulativeStagesAfterStep(event, race.currentStep);
+  if (race.stageResults.length >= completedAfterThisStep) {
+    race.currentStep++;
+  }
+
+  // Final stage of the race?
+  if (race.stageResults.length >= event.stages.length) {
+    finishRace(universe);
+  }
+}
+
+/** Total stages in current step (for the auto-play tick counter) */
+export function stagesInCurrentStep(universe: Universe): number {
+  const race = universe.season.activeRace;
+  if (!race) return 0;
+  const event = universe.season.calendar[universe.season.currentEventIndex];
+  if (!event) return 0;
+  return stagesInStep(event, race.currentStep);
 }
 
 function finishRace(universe: Universe): void {
