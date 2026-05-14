@@ -4,8 +4,8 @@ import { generateUniverse } from '../data/generators';
 import { startRace, simulateNextStep, dismissRace, isSeasonOver } from '../engine/season';
 import { endSeason } from '../engine/offseason';
 
-const STORAGE_KEY = 'peloton.v2';
-const LEGACY_KEYS = ['peloton.v1'];
+const STORAGE_KEY = 'peloton.v3';
+const LEGACY_KEYS = ['peloton.v1', 'peloton.v2'];
 
 interface GameStore {
   universe: Universe | null;
@@ -32,6 +32,7 @@ export type View =
   | 'home'
   | 'calendar'
   | 'race'
+  | 'season'
   | 'standings'
   | 'teams'
   | 'team-detail'
@@ -67,10 +68,19 @@ export const useGame = create<GameStore>((set, get) => ({
       const raw = localStorage.getItem(STORAGE_KEY);
       if (!raw) return false;
       const universe = JSON.parse(raw) as Universe;
-      // Schema sanity check: a v2 save has team.bonus and team.emoji.
+      // Schema sanity check: a v3 save has raceWinsBy on team/rider history.
       const sampleTeam = Object.values(universe.teams)[0];
       if (!sampleTeam || !('bonus' in sampleTeam) || !('emoji' in sampleTeam)) {
-        console.warn('Save schema mismatch — discarding old save.');
+        console.warn('Save schema mismatch (pre-v2) — discarding old save.');
+        localStorage.removeItem(STORAGE_KEY);
+        return false;
+      }
+      // Check v3: any team or rider history row should have raceWinsBy.
+      const teamHist = sampleTeam.history?.[0];
+      const sampleRider = Object.values(universe.riders).find((r) => r.history.length > 0);
+      const riderHist = sampleRider?.history[0];
+      if ((teamHist && !('raceWinsBy' in teamHist)) || (riderHist && !('raceWinsBy' in riderHist))) {
+        console.warn('Save schema mismatch (pre-v3) — discarding old save.');
         localStorage.removeItem(STORAGE_KEY);
         return false;
       }

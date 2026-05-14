@@ -1,5 +1,7 @@
 import { useGame } from '../state/store';
 import { SKILL_KEYS, SKILL_LABELS } from '../types';
+import { flagFor } from '../utils/flags';
+import { eventName, terrainLabel } from '../utils/eventNames';
 import type { Rider } from '../types';
 
 export function RiderDetailView() {
@@ -30,8 +32,9 @@ export function RiderDetailView() {
       <div className="border-y-2 border-ink py-5 mb-6">
         <div className="flex items-end justify-between flex-wrap gap-3">
           <div>
-            <div className="font-sans tracking-widest text-xs opacity-60">
-              {rider.nationality}
+            <div className="font-sans tracking-widest text-xs opacity-60 flex items-center gap-2">
+              <span>{flagFor(rider.nationality)}</span>
+              <span>{rider.nationality}</span>
               {rider.retired && <span className="ml-2 text-rouge">· RETIRED</span>}
             </div>
             <div className="font-display font-black text-5xl leading-none">{rider.name}</div>
@@ -110,6 +113,17 @@ export function RiderDetailView() {
         </div>
       </div>
 
+      {/* Stage win breakdown by terrain */}
+      {rider.history.some((h) => h.stageWinsByDetail && h.stageWinsByDetail.length > 0) && (
+        <div className="mb-6">
+          <div className="flex items-baseline gap-3 mb-3">
+            <div className="font-display font-bold text-xl">Stage Wins · Career Breakdown</div>
+            <div className="flex-1 rule" />
+          </div>
+          <StageWinBreakdown rider={rider} />
+        </div>
+      )}
+
       {/* Career timeline */}
       {rider.history.length > 0 && (
         <div>
@@ -125,8 +139,8 @@ export function RiderDetailView() {
                   <th className="text-left p-2.5 font-sans text-xs tracking-widest opacity-60">AGE</th>
                   <th className="text-left p-2.5 font-sans text-xs tracking-widest opacity-60">PHASE</th>
                   <th className="text-right p-2.5 font-sans text-xs tracking-widest opacity-60">PTS</th>
-                  <th className="text-right p-2.5 font-sans text-xs tracking-widest opacity-60">RACE W</th>
-                  <th className="text-right p-2.5 font-sans text-xs tracking-widest opacity-60">STAGE W</th>
+                  <th className="text-left p-2.5 font-sans text-xs tracking-widest opacity-60">RACE WINS</th>
+                  <th className="text-left p-2.5 font-sans text-xs tracking-widest opacity-60">STAGE WINS</th>
                   <th className="text-left p-2.5 font-sans text-xs tracking-widest opacity-60">GRAND TOURS</th>
                   <th className="text-left p-2.5 font-sans text-xs tracking-widest opacity-60">JERSEYS</th>
                 </tr>
@@ -138,8 +152,34 @@ export function RiderDetailView() {
                     <td className="p-2.5 font-mono">{h.age}</td>
                     <td className="p-2.5 font-mono text-xs opacity-70 capitalize">{h.phase}</td>
                     <td className="p-2.5 text-right font-mono">{h.points}</td>
-                    <td className="p-2.5 text-right font-mono">{h.raceWins}</td>
-                    <td className="p-2.5 text-right font-mono">{h.stageWins}</td>
+                    <td className="p-2.5 font-mono text-xs">
+                      {h.raceWins === 0 ? (
+                        <span className="opacity-40">—</span>
+                      ) : (
+                        <div>
+                          <div className="font-bold text-rouge">{h.raceWins}</div>
+                          {(h.raceWinsBy ?? []).map((eid) => (
+                            <div key={eid} className="opacity-80 whitespace-nowrap">
+                              {eventName(eid)}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </td>
+                    <td className="p-2.5 font-mono text-xs">
+                      {h.stageWins === 0 ? (
+                        <span className="opacity-40">—</span>
+                      ) : (
+                        <div>
+                          <div className="font-bold">{h.stageWins}</div>
+                          {(h.stageWinsByDetail ?? []).map((d, i) => (
+                            <div key={i} className="opacity-80 whitespace-nowrap">
+                              {eventName(d.eventId)}: {d.count} ({terrainLabel(d.stageType)})
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </td>
                     <td className="p-2.5 font-mono text-xs">
                       {Object.entries(h.grandTourFinishes).length === 0 ? (
                         <span className="opacity-40">—</span>
@@ -255,4 +295,44 @@ function JerseyDots({
 
 function Dot({ cls, title }: { cls: string; title: string }) {
   return <span className={`${cls} inline-block w-3 h-3`} title={title} />;
+}
+
+function StageWinBreakdown({ rider }: { rider: Rider }) {
+  // Aggregate across all years: stageType -> { count, races: [{ event, count }] }
+  const byTerrain = new Map<string, { count: number; races: Map<string, number> }>();
+  for (const h of rider.history) {
+    for (const d of h.stageWinsByDetail ?? []) {
+      let entry = byTerrain.get(d.stageType);
+      if (!entry) {
+        entry = { count: 0, races: new Map() };
+        byTerrain.set(d.stageType, entry);
+      }
+      entry.count += d.count;
+      entry.races.set(d.eventId, (entry.races.get(d.eventId) ?? 0) + d.count);
+    }
+  }
+  if (byTerrain.size === 0) return null;
+  const sorted = [...byTerrain.entries()].sort((a, b) => b[1].count - a[1].count);
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+      {sorted.map(([terrain, info]) => (
+        <div key={terrain} className="card-paper p-4">
+          <div className="flex items-baseline justify-between mb-2">
+            <div className="font-display font-bold">{terrainLabel(terrain)}</div>
+            <div className="font-mono text-rouge font-bold text-2xl">{info.count}</div>
+          </div>
+          <div className="space-y-0.5 text-xs font-mono">
+            {[...info.races.entries()]
+              .sort((a, b) => b[1] - a[1])
+              .map(([eid, n]) => (
+                <div key={eid} className="flex justify-between opacity-80">
+                  <span>{eventName(eid)}</span>
+                  <span>×{n}</span>
+                </div>
+              ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
 }

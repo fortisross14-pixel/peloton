@@ -1,5 +1,6 @@
 import { useGame } from '../state/store';
 import { SKILL_KEYS, SKILL_LABELS } from '../types';
+import { eventName, terrainLabel } from '../utils/eventNames';
 import type { Rider } from '../types';
 
 export function TeamDetailView() {
@@ -191,20 +192,46 @@ export function TeamDetailView() {
                   <th className="text-left p-2.5 font-sans text-xs tracking-widest opacity-60">YEAR</th>
                   <th className="text-right p-2.5 font-sans text-xs tracking-widest opacity-60">RANK</th>
                   <th className="text-right p-2.5 font-sans text-xs tracking-widest opacity-60">POINTS</th>
-                  <th className="text-right p-2.5 font-sans text-xs tracking-widest opacity-60">RACE WINS</th>
-                  <th className="text-right p-2.5 font-sans text-xs tracking-widest opacity-60">STAGE WINS</th>
+                  <th className="text-left p-2.5 font-sans text-xs tracking-widest opacity-60">RACE WINS</th>
+                  <th className="text-left p-2.5 font-sans text-xs tracking-widest opacity-60">STAGE WINS</th>
                 </tr>
               </thead>
               <tbody>
                 {[...team.history].reverse().map((h) => (
-                  <tr key={h.year} className="border-b border-ink/10">
-                    <td className="p-2.5 font-mono">{h.year}</td>
+                  <tr key={h.year} className="border-b border-ink/10 align-top">
+                    <td className="p-2.5 font-mono font-bold">{h.year}</td>
                     <td className={`p-2.5 text-right font-mono ${h.ranking <= 3 ? 'text-rouge font-bold' : ''}`}>
                       #{h.ranking}
                     </td>
                     <td className="p-2.5 text-right font-mono">{h.points}</td>
-                    <td className="p-2.5 text-right font-mono">{h.raceWins}</td>
-                    <td className="p-2.5 text-right font-mono">{h.stageWins}</td>
+                    <td className="p-2.5 font-mono text-xs">
+                      {h.raceWins === 0 ? (
+                        <span className="opacity-40">—</span>
+                      ) : (
+                        <div>
+                          <div className="font-bold text-rouge">{h.raceWins}</div>
+                          {(h.raceWinsBy ?? []).map((eid) => (
+                            <div key={eid} className="opacity-80 whitespace-nowrap">
+                              {eventName(eid)}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </td>
+                    <td className="p-2.5 font-mono text-xs">
+                      {h.stageWins === 0 ? (
+                        <span className="opacity-40">—</span>
+                      ) : (
+                        <div>
+                          <div className="font-bold">{h.stageWins}</div>
+                          {(h.stageWinsByDetail ?? []).map((d, i) => (
+                            <div key={i} className="opacity-80 whitespace-nowrap">
+                              {eventName(d.eventId)}: {d.count} ({terrainLabel(d.stageType)})
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </td>
                   </tr>
                 ))}
               </tbody>

@@ -64,6 +64,10 @@ export interface RiderSeasonStats {
   points: number;
   stageWins: number;
   raceWins: number;
+  // Which races they won this year (event ids)
+  raceWinsBy: string[];
+  // Stage wins broken out: { eventId, stageType, count }
+  stageWinsByDetail: { eventId: string; stageType: string; count: number }[];
   // Grand Tour finishes: keyed by event id
   grandTourFinishes: Record<string, number>; // event id -> GC position
   // Jerseys won (count, since rookie can win youth multiple GTs)
@@ -174,6 +178,10 @@ export interface TeamSeasonStats {
   stageWins: number;
   ranking: number;
   riderIds: string[];
+  // Which races team won (rider on this team finished 1st GC)
+  raceWinsBy: string[];
+  // Stage wins broken out: { eventId, stageType, count }
+  stageWinsByDetail: { eventId: string; stageType: string; count: number }[];
 }
 
 export interface Team {
@@ -335,7 +343,7 @@ export interface CompletedEventResult {
     youth: string | null;
     teamWinnerId: string;
   };
-  stageWinners: Array<{ stageIndex: number; riderId: string }>;
+  stageWinners: Array<{ stageIndex: number; riderId: string; stageType: string }>;
 }
 
 // ============================================================================

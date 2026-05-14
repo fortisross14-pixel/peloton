@@ -21,13 +21,33 @@ export function endSeason(universe: Universe): void {
     .sort((a, b) => b.pts - a.pts);
 
   for (const team of Object.values(universe.teams)) {
+    const raceWinsBy: string[] = [];
+    const stageDetailMap = new Map<string, { eventId: string; stageType: string; count: number }>();
+
+    for (const ev of universe.season.completedEvents) {
+      const winnerId = ev.finalGc[0]?.riderId;
+      if (winnerId && universe.riders[winnerId]?.teamId === team.id) {
+        raceWinsBy.push(ev.eventId);
+      }
+      for (const sw of ev.stageWinners) {
+        if (universe.riders[sw.riderId]?.teamId === team.id) {
+          const key = `${ev.eventId}|${sw.stageType}`;
+          const existing = stageDetailMap.get(key);
+          if (existing) existing.count += 1;
+          else stageDetailMap.set(key, { eventId: ev.eventId, stageType: sw.stageType, count: 1 });
+        }
+      }
+    }
+
     team.history.push({
       year: universe.currentYear,
       points: universe.season.teamPoints[team.id] ?? 0,
-      raceWins: countRaceWins(universe, team.id),
-      stageWins: countStageWins(universe, team.id),
+      raceWins: raceWinsBy.length,
+      stageWins: Array.from(stageDetailMap.values()).reduce((a, b) => a + b.count, 0),
       ranking: 0,
       riderIds: [...team.riderIds],
+      raceWinsBy,
+      stageWinsByDetail: Array.from(stageDetailMap.values()),
     });
   }
   sortedTeams.forEach((t, i) => {
@@ -244,26 +264,6 @@ function ensureDirectorPool(universe: Universe, rng: () => number): void {
 function avgSkill(rider: { skills: Record<string, number> }): number {
   const vals = Object.values(rider.skills);
   return vals.reduce((a, b) => a + b, 0) / vals.length;
-}
-
-function countRaceWins(universe: Universe, teamId: string): number {
-  let wins = 0;
-  for (const ev of universe.season.completedEvents) {
-    const winnerId = ev.finalGc[0]?.riderId;
-    if (!winnerId) continue;
-    if (universe.riders[winnerId]?.teamId === teamId) wins++;
-  }
-  return wins;
-}
-
-function countStageWins(universe: Universe, teamId: string): number {
-  let wins = 0;
-  for (const ev of universe.season.completedEvents) {
-    for (const sw of ev.stageWinners) {
-      if (universe.riders[sw.riderId]?.teamId === teamId) wins++;
-    }
-  }
-  return wins;
 }
 
 function saveHallOfFame(universe: Universe): void {

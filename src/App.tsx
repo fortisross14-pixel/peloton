@@ -4,6 +4,7 @@ import { Home } from './components/Home';
 import { Header } from './components/Header';
 import { CalendarView } from './components/CalendarView';
 import { RaceView } from './components/RaceView';
+import { SeasonView } from './components/SeasonView';
 import { StandingsView } from './components/StandingsView';
 import { TeamsView } from './components/TeamsView';
 import { TeamDetailView } from './components/TeamDetailView';
@@ -33,6 +34,7 @@ export default function App() {
         {view === 'home' && <Home />}
         {view === 'calendar' && <CalendarView />}
         {view === 'race' && <RaceView />}
+        {view === 'season' && <SeasonView />}
         {view === 'standings' && <StandingsView />}
         {view === 'teams' && <TeamsView />}
         {view === 'team-detail' && <TeamDetailView />}

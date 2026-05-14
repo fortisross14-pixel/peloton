@@ -6,7 +6,7 @@ export function Home() {
   const universe = useGame((s) => s.universe);
 
   const hasSave = (() => {
-    try { return !!localStorage.getItem('peloton.v2'); } catch { return false; }
+    try { return !!localStorage.getItem('peloton.v3'); } catch { return false; }
   })();
 
   return (

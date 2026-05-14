@@ -10,6 +10,7 @@ export function Header() {
   const navItems: { id: typeof view; label: string }[] = [
     { id: 'calendar', label: 'Calendar' },
     { id: 'race', label: 'Race' },
+    { id: 'season', label: 'Season' },
     { id: 'standings', label: 'Standings' },
     { id: 'teams', label: 'Teams' },
     { id: 'history', label: 'Almanac' },

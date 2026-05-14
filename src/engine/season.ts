@@ -239,6 +239,7 @@ function finishRace(universe: Universe): void {
   const stageWinners = race.stageResults.map((sr) => ({
     stageIndex: sr.stageIndex,
     riderId: sr.finishers[0]?.riderId ?? '',
+    stageType: sr.stageType,
   }));
   const completed: CompletedEventResult = {
     eventId: event.id,
@@ -266,6 +267,8 @@ function finishRace(universe: Universe): void {
         points: 0,
         stageWins: 0,
         raceWins: 0,
+        raceWinsBy: [],
+        stageWinsByDetail: [],
         grandTourFinishes: {},
         jerseys: { gc: [], points: [], mountain: [], youth: [] },
       };
@@ -274,9 +277,30 @@ function finishRace(universe: Universe): void {
     if (event.category === 'grand-tour') {
       yearStats.grandTourFinishes[event.id] = row.position;
     }
-    yearStats.stageWins += race.stageWinsByRider[rider.id] ?? 0;
+
+    // Stage wins this race for this rider, broken out by terrain.
+    const stageWinsThisRace = race.stageWinsByRider[rider.id] ?? 0;
+    yearStats.stageWins += stageWinsThisRace;
+    if (stageWinsThisRace > 0) {
+      // Group the rider's stage wins by stageType
+      const byType: Record<string, number> = {};
+      for (const sr of race.stageResults) {
+        if (sr.finishers[0]?.riderId === rider.id) {
+          byType[sr.stageType] = (byType[sr.stageType] ?? 0) + 1;
+        }
+      }
+      for (const [stageType, count] of Object.entries(byType)) {
+        const existing = yearStats.stageWinsByDetail.find(
+          (d) => d.eventId === eventId && d.stageType === stageType,
+        );
+        if (existing) existing.count += count;
+        else yearStats.stageWinsByDetail.push({ eventId, stageType, count });
+      }
+    }
+
     if (jerseys.gc === rider.id) {
       yearStats.raceWins += 1;
+      yearStats.raceWinsBy.push(eventId);
       yearStats.jerseys.gc.push(eventId);
     }
     if (jerseys.points === rider.id) yearStats.jerseys.points.push(eventId);
