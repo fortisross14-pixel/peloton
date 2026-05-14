@@ -31,6 +31,7 @@ interface GameStore {
   stagesRemainingInStep: () => number;
   dismissActiveRace: () => void;
   endSeasonAndAdvance: () => void;
+  runOffseasonAndShowMarket: () => void;
 
   setView: (view: View) => void;
   selectTeam: (id: string | null) => void;
@@ -42,6 +43,8 @@ export type View =
   | 'calendar'
   | 'race'
   | 'season'
+  | 'season-summary'
+  | 'market-report'
   | 'standings'
   | 'teams'
   | 'team-detail'
@@ -157,12 +160,21 @@ export const useGame = create<GameStore>((set, get) => ({
   },
 
   endSeasonAndAdvance: () => {
+    // Used by the Calendar's "Season Concluded" button — opens the summary
+    // screen first; no mutations until the user advances through the market.
+    const u = get().universe;
+    if (!u) return;
+    if (!isSeasonOver(u)) return;
+    set({ view: 'season-summary' });
+  },
+
+  runOffseasonAndShowMarket: () => {
     const u = get().universe;
     if (!u) return;
     if (!isSeasonOver(u)) return;
     endSeason(u);
     persist(u);
-    set({ universe: { ...u }, view: 'calendar' });
+    set({ universe: { ...u }, view: 'market-report' });
   },
 
   setView: (view) => set({ view }),
