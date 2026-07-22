@@ -8,6 +8,7 @@ import { SeasonView } from './components/SeasonView';
 import { SeasonSummaryView } from './components/SeasonSummaryView';
 import { MarketReportView } from './components/MarketReportView';
 import { StandingsView } from './components/StandingsView';
+import { RidersView } from './components/RidersView';
 import { TeamsView } from './components/TeamsView';
 import { TeamDetailView } from './components/TeamDetailView';
 import { RiderDetailView } from './components/RiderDetailView';
@@ -40,6 +41,7 @@ export default function App() {
         {view === 'season-summary' && <SeasonSummaryView />}
         {view === 'market-report' && <MarketReportView />}
         {view === 'standings' && <StandingsView />}
+        {view === 'riders' && <RidersView />}
         {view === 'teams' && <TeamsView />}
         {view === 'team-detail' && <TeamDetailView />}
         {view === 'rider-detail' && <RiderDetailView />}

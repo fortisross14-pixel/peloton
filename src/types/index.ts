@@ -2,7 +2,7 @@
 // CORE TYPES
 // ============================================================================
 
-export type Rarity = 'legend' | 'epic' | 'rare' | 'uncommon' | 'common';
+export type Rarity = 'generational' | 'legend' | 'epic' | 'rare' | 'uncommon' | 'common';
 
 /**
  * Rider archetype — drives skill profile at generation, awards bonuses
@@ -17,10 +17,11 @@ export type Archetype =
   | 'classics'        // monuments (Flanders, Roubaix)
   | 'allrounder';     // versatile, no peak skill
 
-export const RARITY_ORDER: Rarity[] = ['legend', 'epic', 'rare', 'uncommon', 'common'];
+export const RARITY_ORDER: Rarity[] = ['generational', 'legend', 'epic', 'rare', 'uncommon', 'common'];
 
 // Probability distribution for rarity rolls (mirrors CL game vibe)
 export const RARITY_WEIGHTS: Record<Rarity, number> = {
+  generational: 0, // controlled globally: never more than two active
   legend: 0.03,
   epic: 0.12,
   rare: 0.25,
@@ -128,7 +129,9 @@ export interface Rider {
   nationality: string;
   rarity: Rarity;
   archetype: Archetype;
-  skills: Skills;          // base skills, 1-99
+  skills: Skills;          // base skills, 1-100
+  seasonForm: number;      // annual multiplier, normally 0.95-1.05
+  stamina: number;         // 0-100; depleted by stage races, recovers between events
   leadership: number;      // 1-99, independent from rarity
   consistency: number;     // 1-99, variance reducer
   // Career

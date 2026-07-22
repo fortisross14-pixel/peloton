@@ -12,6 +12,7 @@ export function Header() {
     { id: 'race', label: 'Race' },
     { id: 'season', label: 'Season' },
     { id: 'standings', label: 'Standings' },
+    { id: 'riders', label: 'Riders' },
     { id: 'teams', label: 'Teams' },
     { id: 'history', label: 'Almanac' },
   ];

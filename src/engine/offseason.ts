@@ -1,10 +1,10 @@
 import type { Universe, HallOfFameEntry, Team, Rarity } from '../types';
-import { makeRng, randInt, shuffle, pick } from '../utils/random';
-import { generateRider, generateDirector, computePhase, preferredSpecialtyForTeam } from '../data/generators';
+import { makeRng, randInt, randFloat, shuffle, pick } from '../utils/random';
+import { generateRider, generateDirector, computePhase, preferredSpecialtyForTeam, rebalanceElitePopulation } from '../data/generators';
 import { rebuildCalendarStages } from '../data/calendar';
 
 const RARITY_RANK: Record<Rarity, number> = {
-  legend: 5, epic: 4, rare: 3, uncommon: 2, common: 1,
+  generational: 6, legend: 5, epic: 4, rare: 3, uncommon: 2, common: 1,
 };
 
 const DIRECTOR_POOL_SIZE = 16;
@@ -179,7 +179,11 @@ export function endSeason(universe: Universe): void {
   for (const rider of Object.values(universe.riders)) {
     if (rider.retired) continue;
     rider.phase = computePhase(rider.age, rider.careerStartYear, rider.careerLength, newYear);
+    rider.seasonForm = randFloat(rng, 0.95, 1.05);
+    rider.stamina = 100;
   }
+
+  rebalanceElitePopulation(rng, Object.values(universe.riders), true);
 
   // Bump director years-active for everyone still employed.
   for (const dir of Object.values(universe.directors)) {

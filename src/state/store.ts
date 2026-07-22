@@ -11,8 +11,8 @@ import {
 } from '../engine/season';
 import { endSeason } from '../engine/offseason';
 
-const STORAGE_KEY = 'peloton.v5';
-const LEGACY_KEYS = ['peloton.v1', 'peloton.v2', 'peloton.v3', 'peloton.v4'];
+const STORAGE_KEY = 'peloton.v6';
+const LEGACY_KEYS = ['peloton.v1', 'peloton.v2', 'peloton.v3', 'peloton.v4', 'peloton.v5'];
 
 interface GameStore {
   universe: Universe | null;
@@ -46,6 +46,7 @@ export type View =
   | 'season-summary'
   | 'market-report'
   | 'standings'
+  | 'riders'
   | 'teams'
   | 'team-detail'
   | 'rider-detail'

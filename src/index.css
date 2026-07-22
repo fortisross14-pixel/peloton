@@ -96,6 +96,7 @@ body {
 .jersey-white { background: #fafafa; color: #1a1814; border: 1px solid #1a1814; }
 
 /* rarity colors (subdued for paper aesthetic) */
+.rarity-generational { color: #7b1fa2; font-weight: 800; text-shadow: 0 0 10px rgba(123,31,162,.22); }
 .rarity-legend { color: #a8261f; font-weight: 700; }
 .rarity-epic { color: #7a4a1a; font-weight: 600; }
 .rarity-rare { color: #2a4a6b; font-weight: 500; }

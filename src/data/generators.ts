@@ -50,6 +50,7 @@ const ARCHETYPE_FAVORED: Record<Archetype, SkillKey[]> = {
  * Allrounders use a blended range for all skills.
  */
 const SKILL_RANGES: Record<Rarity, { favored: [number, number]; other: [number, number]; allround: [number, number] }> = {
+  generational: { favored: [98, 100], other: [91, 98], allround: [95, 100] },
   legend:   { favored: [95, 100], other: [78, 88], allround: [82, 92] },
   epic:     { favored: [90, 95],  other: [74, 84], allround: [78, 86] },
   rare:     { favored: [85, 90],  other: [70, 80], allround: [74, 82] },
@@ -110,7 +111,8 @@ export function generateRider(
         uncommon: 'rare',
         rare: 'epic',
         epic: 'legend',
-        legend: 'legend',
+        legend: 'generational',
+        generational: 'generational',
       };
       rarity = upgrade[rarity];
     }
@@ -149,6 +151,8 @@ export function generateRider(
     rarity,
     archetype,
     skills,
+    seasonForm: randFloat(rng, 0.95, 1.05),
+    stamina: 100,
     leadership,
     consistency,
     careerStartYear,
@@ -185,7 +189,8 @@ export function phaseMultiplier(rider: Rider, currentYear: number): number {
   const yearsIn = currentYear - rider.careerStartYear;
   const remaining = rider.careerLength - yearsIn;
   if (yearsIn < 0) return 0.8;
-  if (yearsIn < 2) return 0.8;             // rookie
+  if (yearsIn === 0) return 0.8;          // first-year rookie
+  if (yearsIn === 1) return 0.9;           // sophomore development
   if (remaining > 2) return 1.0;           // prime
   if (remaining === 2) return 0.9;         // first veteran year
   if (remaining === 1) return 0.8;         // last year
@@ -308,6 +313,42 @@ export function preferredSpecialtyForTeam(team: Team): Director['specialty'] {
   }
 }
 
+
+export function rebalanceElitePopulation(rng: Rng, riders: Rider[], preserveExisting = false): void {
+  const active = riders.filter((r) => !r.retired);
+  const avg = (r: Rider) => SKILL_KEYS.reduce((sum, k) => sum + r.skills[k], 0) / SKILL_KEYS.length;
+  const setTier = (r: Rider, rarity: Rarity) => {
+    r.rarity = rarity;
+    r.skills = rollSkills(rng, rarity, r.archetype);
+  };
+
+  let gens = active.filter((r) => r.rarity === 'generational').sort((a, b) => avg(b) - avg(a));
+  // Generational status is permanent. Only trim impossible legacy states above two.
+  for (const r of gens.slice(2)) setTier(r, 'legend');
+  gens = active.filter((r) => r.rarity === 'generational');
+  const desiredGenerational = preserveExisting
+    ? Math.min(2, gens.length + (gens.length === 0 ? (rng() < 0.50 ? 0 : rng() < 0.80 ? 1 : 2) : gens.length === 1 && rng() < 0.10 ? 1 : 0))
+    : (() => { const roll = rng(); return roll < 0.50 ? 0 : roll < 0.90 ? 1 : 2; })();
+  const genCandidates = active.filter((r) => r.rarity === 'legend' || r.rarity === 'epic').sort((a, b) => avg(b) - avg(a));
+  while (gens.length < desiredGenerational && genCandidates.length) {
+    const r = genCandidates.shift()!;
+    setTier(r, 'generational');
+    gens.push(r);
+  }
+
+  const legendTarget = rng() < 0.5 ? 3 : 4;
+  let legends = active.filter((r) => r.rarity === 'legend').sort((a, b) => avg(b) - avg(a));
+  // Keep established legends unless the active pool somehow exceeds four.
+  for (const r of legends.slice(4)) setTier(r, 'epic');
+  legends = active.filter((r) => r.rarity === 'legend');
+  const legendCandidates = active.filter((r) => r.rarity === 'epic').sort((a, b) => avg(b) - avg(a));
+  while (legends.length < legendTarget && legendCandidates.length) {
+    const r = legendCandidates.shift()!;
+    setTier(r, 'legend');
+    legends.push(r);
+  }
+}
+
 // ============================================================================
 // UNIVERSE GENERATION
 // ============================================================================
@@ -356,7 +397,7 @@ export function generateUniverse(seed: number, startYear: number = 2026): Univer
     const preferred = preferredSpecialtyForTeam(team);
     // Sort: matching specialty first, then by rarity rank.
     const RARITY_RANK: Record<Rarity, number> = {
-      legend: 5, epic: 4, rare: 3, uncommon: 2, common: 1,
+      generational: 6, legend: 5, epic: 4, rare: 3, uncommon: 2, common: 1,
     };
     availableDirectors.sort((a, b) => {
       const aMatch = a.specialty === preferred ? 1 : 0;
@@ -393,6 +434,8 @@ export function generateUniverse(seed: number, startYear: number = 2026): Univer
       allRiders.push(rider);
     }
   }
+
+  rebalanceElitePopulation(rng, allRiders);
 
   return {
     seed,

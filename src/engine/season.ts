@@ -22,7 +22,10 @@ function specialtyScore(rider: Rider, event: CalendarEvent, currentYear: number)
   const phaseMul = phaseMultiplier(rider, currentYear);
   if (phaseMul === 0) return -Infinity; // retired
 
-  const s = rider.skills;
+  const form = rider.seasonForm ?? 1;
+  const stamina = rider.stamina ?? 100;
+  const readiness = stamina >= 85 ? 1 : Math.max(0.80, 1 - (85 - stamina) * 0.0045);
+  const s = Object.fromEntries(Object.entries(rider.skills).map(([k, v]) => [k, v * form * readiness])) as Rider['skills'];
   switch (event.id) {
     case 'tour':
     case 'giro':
@@ -86,7 +89,7 @@ function selectRoster(universe: Universe, event: CalendarEvent): string[] {
     // Filter active riders only
     const active = team.riderIds
       .map((id) => universe.riders[id])
-      .filter((r) => r && !r.retired && phaseMultiplier(r, universe.currentYear) > 0);
+      .filter((r) => r && !r.retired && (r.stamina ?? 100) >= 30 && phaseMultiplier(r, universe.currentYear) > 0);
 
     let candidates = active.map((r) => ({
       rider: r,
@@ -101,8 +104,8 @@ function selectRoster(universe: Universe, event: CalendarEvent): string[] {
       candidates = candidates.map((c) => {
         const needsGT = c.gtsDone === 0;
         // If a rider hasn't done a GT and there are few remaining, big boost
-        const urgency = needsGT ? 100 / Math.max(1, remaining) : 0;
-        return { ...c, score: c.score + urgency * 10 };
+        const urgency = needsGT ? 6 / Math.max(1, remaining) : 0;
+        return { ...c, score: c.score + urgency };
       });
     }
 
@@ -118,11 +121,32 @@ function selectRoster(universe: Universe, event: CalendarEvent): string[] {
 // RACE LIFECYCLE
 // ============================================================================
 
+function recoverBetweenEvents(universe: Universe): void {
+  const index = universe.season.currentEventIndex;
+  const current = universe.season.calendar[index];
+  if (!current) return;
+  const previous = index > 0 ? universe.season.calendar[index - 1] : null;
+  const currentWeek = current.month * 4 + current.weekInMonth;
+  const previousWeek = previous ? previous.month * 4 + previous.weekInMonth : currentWeek - 3;
+  const gapWeeks = Math.max(1, currentWeek - previousWeek);
+  const recovery = 8 + gapWeeks * 9;
+  for (const rider of Object.values(universe.riders)) {
+    if (!rider.retired) {
+      const gtStarts = universe.season.completedEvents
+        .filter((e) => universe.season.calendar.find((c) => c.id === e.eventId)?.category === 'grand-tour' && e.participants.includes(rider.id))
+        .length;
+      const seasonCeiling = Math.max(68, 100 - gtStarts * 15);
+      rider.stamina = Math.min(seasonCeiling, (rider.stamina ?? 100) + recovery);
+    }
+  }
+}
+
 export function startRace(universe: Universe): void {
   if (universe.season.activeRace) return; // already in race
   const event = universe.season.calendar[universe.season.currentEventIndex];
   if (!event) return; // no events left
 
+  recoverBetweenEvents(universe);
   const participants = selectRoster(universe, event);
 
   universe.season.activeRace = {
@@ -374,6 +398,17 @@ function finishRace(universe: Universe): void {
     stageWinners,
   };
   universe.season.completedEvents.push(completed);
+
+  // Stage races create meaningful calendar choices. Strong endurance reduces
+  // depletion, but racing all three Grand Tours is still possible with rest.
+  for (const riderId of race.participants) {
+    const rider = universe.riders[riderId];
+    if (!rider) continue;
+    const endurance = rider.skills.endurance;
+    const baseCost = event.category === 'grand-tour' ? 54 : event.category === 'week-stage' ? 24 : 9;
+    const enduranceRelief = (endurance - 70) * (event.category === 'grand-tour' ? 0.35 : 0.18);
+    rider.stamina = Math.max(0, (rider.stamina ?? 100) - Math.max(5, baseCost - enduranceRelief));
+  }
 
   // Update each rider's season history (lightweight — only the GC finisher rows
   // have data here; we log positions for top 30 + jerseys + stage wins).

@@ -58,7 +58,11 @@ export function getEffectiveSkill(
   const base = rider.skills[skill];
   const phaseMul = phaseMultiplier(rider, currentYear);
   const directorBoost = director?.boosts[skill] ?? 0;
-  return base * phaseMul * (1 + directorBoost);
+  const form = rider.seasonForm ?? 1;
+  const stamina = rider.stamina ?? 100;
+  // Below 70 stamina performance starts fading; at 30 it is roughly a 9% hit.
+  const staminaMul = stamina >= 85 ? 1 : 1 - ((85 - stamina) / 40) * 0.10;
+  return base * phaseMul * form * staminaMul * (1 + directorBoost);
 }
 
 // Compute the team's identity bonus multiplier for a given stage and event.
@@ -159,6 +163,18 @@ function archetypeStageAdjustment(arch: Archetype, stageType: StageType): number
   }
 }
 
+
+function eventFormMultiplier(riderId: string, eventId: string, year: number): number {
+  let h = 2166136261;
+  const text = `${riderId}:${eventId}:${year}`;
+  for (let i = 0; i < text.length; i++) {
+    h ^= text.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  const unit = (h >>> 0) / 0xffffffff;
+  return 0.94 + unit * 0.12;
+}
+
 // ============================================================================
 // STAGE SIMULATION
 // ============================================================================
@@ -199,6 +215,7 @@ export function simulateStage(input: SimulateStageInput): StageResult {
     const team = teams[rider.teamId];
     const director = team?.directorId ? directors[team.directorId] : undefined;
     let rawScore = scoreRiderForStage(rider, director, stage.type, currentYear);
+    rawScore *= eventFormMultiplier(rider.id, eventId, currentYear);
 
     // Apply team identity bonus (compound with director).
     const teamMult = teamBonusMultiplier(team, stage.type, eventId, raceCategory);
@@ -210,14 +227,23 @@ export function simulateStage(input: SimulateStageInput): StageResult {
     // mountain stages and lose time; a climber doesn't contest bunch sprints.
     rawScore += archetypeStageAdjustment(rider.archetype, stage.type);
 
+    // Three-week GC rewards complete riders. Pure climbers can still dominate
+    // mountain-heavy editions, but GC specialists and all-rounders lose less
+    // time across the full mix of terrain.
+    if (isGT) {
+      if (rider.archetype === 'gc') rawScore += 2.0;
+      else if (rider.archetype === 'allrounder') rawScore += 1.5;
+      else if (rider.archetype === 'climber' && stage.type !== 'mountain' && stage.type !== 'mountain-hard') rawScore -= 1.5;
+    }
+
     // Random variance — wider for low-consistency riders.
-    const variance = (100 - rider.consistency) * 0.25 + 4;
+    const variance = (100 - rider.consistency) * 0.28 + 5;
     rawScore += gaussian(rng) * variance;
 
     // Grand Tour fatigue: rider with low endurance fades in week 3.
     if (isGT) {
       const enduranceFactor = (rider.skills.endurance - 70) / 30;
-      const fatigueLoss = (1 - enduranceFactor) * fatigueProgress * 4;
+      const fatigueLoss = (1 - enduranceFactor) * fatigueProgress * 5.5;
       rawScore -= fatigueLoss;
     }
 
