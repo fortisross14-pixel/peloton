@@ -12,20 +12,22 @@ export function RidersView() {
   const selectRider = useGame((s) => s.selectRider);
   const [query, setQuery] = useState('');
   const [activeOnly, setActiveOnly] = useState(true);
-  if (!universe) return null;
+  const riders = useMemo(() => {
+    if (!universe) return [];
+    return Object.values(universe.riders)
+      .filter((r) => !activeOnly || !r.retired)
+      .filter((r) => r.name.toLowerCase().includes(query.toLowerCase()))
+      .sort((a, b) => rarityRank[b.rarity] - rarityRank[a.rarity] || currentAverage(b, universe.currentYear) - currentAverage(a, universe.currentYear));
+  }, [universe, activeOnly, query]);
 
-  const riders = useMemo(() => Object.values(universe.riders)
-    .filter((r) => !activeOnly || !r.retired)
-    .filter((r) => r.name.toLowerCase().includes(query.toLowerCase()))
-    .sort((a, b) => rarityRank[b.rarity] - rarityRank[a.rarity] || currentAverage(b) - currentAverage(a)),
-  [universe.riders, activeOnly, query]);
-
-  function currentAverage(rider: Rider) {
+  function currentAverage(rider: Rider, currentYear: number) {
     const base = SKILL_KEYS.reduce((sum, key) => sum + rider.skills[key], 0) / SKILL_KEYS.length;
     const stamina = rider.stamina ?? 100;
     const staminaMul = stamina >= 85 ? 1 : 1 - ((85 - stamina) / 40) * 0.10;
-    return base * phaseMultiplier(rider, universe.currentYear) * (rider.seasonForm ?? 1) * staminaMul;
+    return base * phaseMultiplier(rider, currentYear) * (rider.seasonForm ?? 1) * staminaMul;
   }
+
+  if (!universe) return null;
 
   return (
     <div className="pt-8">
@@ -62,7 +64,7 @@ export function RidersView() {
                 <td className="p-3">{ARCHETYPE_LABELS[r.archetype]}</td>
                 <td className={`p-3 uppercase font-bold rarity-${r.rarity}`}>{r.rarity}</td>
                 <td className="p-3 text-right font-mono">{base.toFixed(1)}</td>
-                <td className="p-3 text-right font-mono font-bold">{currentAverage(r).toFixed(1)}</td>
+                <td className="p-3 text-right font-mono font-bold">{currentAverage(r, universe.currentYear).toFixed(1)}</td>
                 <td className="p-3 text-right font-mono">{((r.seasonForm ?? 1) * 100).toFixed(1)}%</td>
                 <td className="p-3 text-right font-mono">{Math.round(r.stamina ?? 100)}</td>
                 {SKILL_KEYS.map((key) => <td key={key} className="p-3 text-right font-mono">{r.skills[key]}</td>)}

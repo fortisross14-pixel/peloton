@@ -1,4 +1,3 @@
-import { useEffect } from 'react';
 import { useGame } from './state/store';
 import { Home } from './components/Home';
 import { Header } from './components/Header';
@@ -17,15 +16,6 @@ import { HistoryView } from './components/HistoryView';
 export default function App() {
   const universe = useGame((s) => s.universe);
   const view = useGame((s) => s.view);
-  const loadGame = useGame((s) => s.loadGame);
-
-  useEffect(() => {
-    // Try to auto-load on first mount.
-    if (!universe) {
-      loadGame();
-    }
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
   if (!universe) {
     return <Home />;
   }

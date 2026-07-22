@@ -4,7 +4,8 @@ export function Header() {
   const universe = useGame((s) => s.universe);
   const view = useGame((s) => s.view);
   const setView = useGame((s) => s.setView);
-  const resetGame = useGame((s) => s.resetGame);
+  const returnToHome = useGame((s) => s.returnToHome);
+  const activeSlot = useGame((s) => s.activeSlot);
   if (!universe) return null;
 
   const navItems: { id: typeof view; label: string }[] = [
@@ -35,15 +36,15 @@ export function Header() {
             </div>
           </div>
           <div className="text-right">
-            <div className="font-mono text-xs opacity-60">SAVE STATE</div>
+            <div className="font-mono text-xs opacity-60">SAVE SLOT {activeSlot ?? '—'}</div>
             <div className="font-mono text-sm">SEED · {universe.seed.toString(16).toUpperCase().slice(0, 6)}</div>
             <button
               className="text-xs underline opacity-60 hover:opacity-100 mt-1"
               onClick={() => {
-                if (confirm('Erase save and return to home?')) resetGame();
+                returnToHome();
               }}
             >
-              new game
+              save slots
             </button>
           </div>
         </div>
