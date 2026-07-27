@@ -1,7 +1,7 @@
 import { useGame } from '../state/store';
 import { Flag } from '../utils/flags';
 import { eventName } from '../utils/eventNames';
-import { ARCHETYPE_LABELS } from '../types';
+import { ARCHETYPE_LABELS, RACE_SPECIALTY_LABELS } from '../types';
 import type { Rider, Team } from '../types';
 
 export function SeasonSummaryView() {
@@ -95,7 +95,7 @@ export function SeasonSummaryView() {
                 {r.name}
               </button>
               <div className="font-body italic opacity-70 mt-1">
-                {ARCHETYPE_LABELS[r.archetype]} · {t?.name}
+                {ARCHETYPE_LABELS[r.archetype]} · {RACE_SPECIALTY_LABELS[r.raceSpecialty]} · {t?.name}
               </div>
               <div className="font-mono text-xs opacity-60 mt-2">
                 {riderStandings[0][1].toLocaleString()} points

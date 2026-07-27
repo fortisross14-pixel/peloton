@@ -8,8 +8,9 @@ import type {
   Universe,
   CareerPhase,
   Archetype,
+  RaceSpecialty,
 } from '../types';
-import { RARITY_WEIGHTS, SKILL_KEYS, ARCHETYPE_WEIGHTS } from '../types';
+import { RARITY_WEIGHTS, SKILL_KEYS, ARCHETYPE_WEIGHTS, RACE_SPECIALTY_WEIGHTS } from '../types';
 import {
   makeRng,
   randInt,
@@ -37,10 +38,8 @@ import { TEAM_TEMPLATES, type TeamTemplate } from './teams';
 const ARCHETYPE_FAVORED: Record<Archetype, SkillKey[]> = {
   climber:    ['climbing', 'descending'],
   sprinter:   ['sprinting', 'endurance'],
-  gc:         ['climbing', 'timeTrial'],
   rouleur:    ['timeTrial', 'cobbles'],
   puncheur:   ['breakaway', 'climbing'],
-  classics:   ['cobbles', 'breakaway', 'endurance'],
   allrounder: [], // no peak — all skills sit at the avg range
 };
 
@@ -57,6 +56,28 @@ const SKILL_RANGES: Record<Rarity, { favored: [number, number]; other: [number, 
   uncommon: { favored: [80, 85],  other: [60, 70], allround: [66, 74] },
   common:   { favored: [70, 80],  other: [45, 60], allround: [55, 65] },
 };
+
+const NON_ELITE_RARITY_WEIGHTS: Record<Rarity, number> = {
+  generational: 0,
+  legend: 0,
+  epic: 0.18,
+  rare: 0.30,
+  uncommon: 0.32,
+  common: 0.20,
+};
+
+function averageSkills(skills: Skills): number {
+  return SKILL_KEYS.reduce((sum, key) => sum + skills[key], 0) / SKILL_KEYS.length;
+}
+
+function initialGenerationalTarget(rng: Rng): number {
+  const roll = rng();
+  return roll < 0.50 ? 0 : roll < 0.90 ? 1 : 2;
+}
+
+function initialLegendTarget(rng: Rng): number {
+  return rng() < 0.5 ? 3 : 4;
+}
 
 function rollSkills(rng: Rng, rarity: Rarity, archetype: Archetype): Skills {
   const skills: Partial<Skills> = {};
@@ -94,24 +115,29 @@ export function generateRider(
     forcedRarity?: Rarity;
     forcedAge?: number;
     forcedArchetype?: Archetype;
+    forcedRaceSpecialty?: RaceSpecialty;
     nationality?: string;
     /** If provided, ~50% chance the rider is from one of these nations, else random. */
     homeBiasNations?: string[];
     /** If provided, bumps rarity roll one tier up by this probability (0-1). */
     rarityBoost?: number;
+    /** Normal roster generation excludes Legend/Generational unless explicitly forced. */
+    allowEliteRoll?: boolean;
   } = {},
 ): Rider {
   let rarity = options.forcedRarity;
   if (!rarity) {
-    rarity = weightedPick(rng, RARITY_WEIGHTS);
-    // Apply rarity boost (Nordkraft-style youth pipeline)
+    const weights = options.allowEliteRoll ? RARITY_WEIGHTS : NON_ELITE_RARITY_WEIGHTS;
+    rarity = weightedPick(rng, weights);
+    // Youth development can improve a normal prospect, but it cannot create
+    // a new Legend/Generational outside the controlled elite rookie queue.
     if (options.rarityBoost && rng() < options.rarityBoost) {
       const upgrade: Record<Rarity, Rarity> = {
         common: 'uncommon',
         uncommon: 'rare',
         rare: 'epic',
-        epic: 'legend',
-        legend: 'generational',
+        epic: options.allowEliteRoll ? 'legend' : 'epic',
+        legend: options.allowEliteRoll ? 'generational' : 'legend',
         generational: 'generational',
       };
       rarity = upgrade[rarity];
@@ -119,6 +145,7 @@ export function generateRider(
   }
 
   const archetype = options.forcedArchetype ?? weightedPick(rng, ARCHETYPE_WEIGHTS);
+  const raceSpecialty = options.forcedRaceSpecialty ?? weightedPick(rng, RACE_SPECIALTY_WEIGHTS);
 
   // Resolve nationality with home bias
   let nationality: string;
@@ -150,8 +177,11 @@ export function generateRider(
     nationality,
     rarity,
     archetype,
+    raceSpecialty,
     skills,
+    baseOverall: averageSkills(skills),
     seasonForm: randFloat(rng, 0.95, 1.05),
+    careerMomentum: randFloat(rng, 0.985, 1.015),
     stamina: 100,
     leadership,
     consistency,
@@ -314,39 +344,34 @@ export function preferredSpecialtyForTeam(team: Team): Director['specialty'] {
 }
 
 
-export function rebalanceElitePopulation(rng: Rng, riders: Rider[], preserveExisting = false): void {
+export function buildEliteRookieQueue(rng: Rng, riders: Rider[]): Rarity[] {
   const active = riders.filter((r) => !r.retired);
-  const avg = (r: Rider) => SKILL_KEYS.reduce((sum, k) => sum + r.skills[k], 0) / SKILL_KEYS.length;
-  const setTier = (r: Rider, rarity: Rarity) => {
-    r.rarity = rarity;
-    r.skills = rollSkills(rng, rarity, r.archetype);
-  };
+  const activeGenerational = active.filter((r) => r.rarity === 'generational').length;
+  const activeLegends = active.filter((r) => r.rarity === 'legend').length;
 
-  let gens = active.filter((r) => r.rarity === 'generational').sort((a, b) => avg(b) - avg(a));
-  // Generational status is permanent. Only trim impossible legacy states above two.
-  for (const r of gens.slice(2)) setTier(r, 'legend');
-  gens = active.filter((r) => r.rarity === 'generational');
-  const desiredGenerational = preserveExisting
-    ? Math.min(2, gens.length + (gens.length === 0 ? (rng() < 0.50 ? 0 : rng() < 0.80 ? 1 : 2) : gens.length === 1 && rng() < 0.10 ? 1 : 0))
-    : (() => { const roll = rng(); return roll < 0.50 ? 0 : roll < 0.90 ? 1 : 2; })();
-  const genCandidates = active.filter((r) => r.rarity === 'legend' || r.rarity === 'epic').sort((a, b) => avg(b) - avg(a));
-  while (gens.length < desiredGenerational && genCandidates.length) {
-    const r = genCandidates.shift()!;
-    setTier(r, 'generational');
-    gens.push(r);
+  // Rarity is immutable. Elite numbers are maintained only by introducing
+  // elite rookies when careers end — never by promoting or demoting riders.
+  let desiredGenerational = activeGenerational;
+  if (activeGenerational === 0) {
+    // A generational rookie is genuinely rare. Because the rarity remains for
+    // a 9-12 year career, a low annual arrival rate keeps roughly half of
+    // long-run seasons without one active.
+    const roll = rng();
+    desiredGenerational = roll < 0.93 ? 0 : roll < 0.995 ? 1 : 2;
+  } else if (activeGenerational === 1 && rng() < 0.02) {
+    desiredGenerational = 2;
   }
+  desiredGenerational = Math.min(2, desiredGenerational);
 
-  const legendTarget = rng() < 0.5 ? 3 : 4;
-  let legends = active.filter((r) => r.rarity === 'legend').sort((a, b) => avg(b) - avg(a));
-  // Keep established legends unless the active pool somehow exceeds four.
-  for (const r of legends.slice(4)) setTier(r, 'epic');
-  legends = active.filter((r) => r.rarity === 'legend');
-  const legendCandidates = active.filter((r) => r.rarity === 'epic').sort((a, b) => avg(b) - avg(a));
-  while (legends.length < legendTarget && legendCandidates.length) {
-    const r = legendCandidates.shift()!;
-    setTier(r, 'legend');
-    legends.push(r);
-  }
+  let desiredLegends = activeLegends;
+  if (activeLegends < 3) desiredLegends = initialLegendTarget(rng);
+  else if (activeLegends === 3 && rng() < 0.35) desiredLegends = 4;
+  desiredLegends = Math.min(4, Math.max(3, desiredLegends));
+
+  const queue: Rarity[] = [];
+  for (let i = activeGenerational; i < desiredGenerational; i++) queue.push('generational');
+  for (let i = activeLegends; i < desiredLegends; i++) queue.push('legend');
+  return shuffle(rng, queue);
 }
 
 // ============================================================================
@@ -414,28 +439,36 @@ export function generateUniverse(seed: number, startYear: number = 2026): Univer
   }
   // Remaining directors stay as free agents (teamId = null).
 
-  // Generate 120 riders. Year 1: ages varied 20-30, careers staggered.
-  // Each rider rolled with the destination team's homeBiasNations.
-  // First, decide team assignments roughly evenly by shuffling slot order.
+  // Generate 120 riders. Elite rarity is assigned at birth and is never
+  // changed later. All remaining riders are capped at Epic during generation.
   const riders: Record<string, Rider> = {};
-  const allRiders: Rider[] = [];
-  // For each team, generate 10 riders biased toward its home nations.
+  const initialGenerational = initialGenerationalTarget(rng);
+  const initialLegends = initialLegendTarget(rng);
+  const eliteAssignments: Array<Rarity | undefined> = shuffle(rng, [
+    ...Array.from({ length: initialGenerational }, () => 'generational' as const),
+    ...Array.from({ length: initialLegends }, () => 'legend' as const),
+    ...Array.from({ length: 120 - initialGenerational - initialLegends }, () => undefined),
+  ]);
+
+  let riderSlot = 0;
   for (const team of teamList) {
     const template = TEAM_TEMPLATES.find((t) => t.shortName === team.shortName)!;
     for (let i = 0; i < 10; i++) {
-      const age = randInt(rng, 20, 30);
+      const forcedRarity = eliteAssignments[riderSlot++];
+      const age = forcedRarity
+        ? randInt(rng, forcedRarity === 'generational' ? 21 : 22, forcedRarity === 'generational' ? 27 : 28)
+        : randInt(rng, 20, 30);
       const rider = generateRider(rng, startYear, {
         forcedAge: age,
+        forcedRarity,
+        allowEliteRoll: false,
         homeBiasNations: template.homeBiasNations,
       });
       rider.teamId = team.id;
       team.riderIds.push(rider.id);
       riders[rider.id] = rider;
-      allRiders.push(rider);
     }
   }
-
-  rebalanceElitePopulation(rng, allRiders);
 
   return {
     seed,

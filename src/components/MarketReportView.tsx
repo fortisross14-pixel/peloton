@@ -1,6 +1,7 @@
+import type { ReactNode } from 'react';
 import { useGame } from '../state/store';
 import { Flag } from '../utils/flags';
-import { ARCHETYPE_LABELS } from '../types';
+import { ARCHETYPE_LABELS, RACE_SPECIALTY_LABELS } from '../types';
 import type { Rider, Team } from '../types';
 
 export function MarketReportView() {
@@ -103,7 +104,7 @@ export function MarketReportView() {
                   <div className="flex-1 min-w-0">
                     <div className="font-body font-bold truncate">{r.name}</div>
                     <div className="font-mono text-[10px] opacity-60 uppercase">
-                      <span className={`rarity-${r.rarity}`}>{r.rarity}</span> · {ARCHETYPE_LABELS[r.archetype]} · age {r.age - 1}
+                      <span className={`rarity-${r.rarity}`}>{r.rarity}</span> · {ARCHETYPE_LABELS[r.archetype]} · {RACE_SPECIALTY_LABELS[r.raceSpecialty]} · age {r.age - 1}
                     </div>
                     {team && (
                       <div className="font-mono text-[10px] opacity-50">
@@ -143,7 +144,7 @@ export function MarketReportView() {
                         <span className={`text-[10px] uppercase ml-1 rarity-${rider.rarity}`}>{rider.rarity}</span>
                       </button>
                     </td>
-                    <td className="p-2.5 font-body text-xs">{ARCHETYPE_LABELS[rider.archetype]}</td>
+                    <td className="p-2.5 font-body text-xs">{ARCHETYPE_LABELS[rider.archetype]} · {RACE_SPECIALTY_LABELS[rider.raceSpecialty]}</td>
                     <td className="p-2.5">
                       {fromTeam && (
                         <button onClick={() => onTeam(fromTeam.id)} className="font-body text-xs hover:underline flex items-center gap-1">
@@ -186,7 +187,7 @@ export function MarketReportView() {
                   <div className="flex-1 min-w-0">
                     <div className="font-body font-bold truncate">{r.name}</div>
                     <div className="font-mono text-[10px] opacity-60 uppercase">
-                      <span className={`rarity-${r.rarity}`}>{r.rarity}</span> · {ARCHETYPE_LABELS[r.archetype]}
+                      <span className={`rarity-${r.rarity}`}>{r.rarity}</span> · {ARCHETYPE_LABELS[r.archetype]} · {RACE_SPECIALTY_LABELS[r.raceSpecialty]}
                     </div>
                     {team && (
                       <div className="font-mono text-[10px] opacity-50">
@@ -218,7 +219,7 @@ function Section({
 }: {
   title: string;
   count: number;
-  children: React.ReactNode;
+  children: ReactNode;
 }) {
   return (
     <div className="mb-6">

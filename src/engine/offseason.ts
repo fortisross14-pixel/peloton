@@ -1,6 +1,6 @@
 import type { Universe, HallOfFameEntry, Team, Rarity } from '../types';
-import { makeRng, randInt, randFloat, shuffle, pick } from '../utils/random';
-import { generateRider, generateDirector, computePhase, preferredSpecialtyForTeam, rebalanceElitePopulation } from '../data/generators';
+import { makeRng, randInt, randFloat, shuffle, pick, gaussian, clamp } from '../utils/random';
+import { generateRider, generateDirector, computePhase, preferredSpecialtyForTeam, buildEliteRookieQueue } from '../data/generators';
 import { rebuildCalendarStages } from '../data/calendar';
 
 const RARITY_RANK: Record<Rarity, number> = {
@@ -10,7 +10,8 @@ const RARITY_RANK: Record<Rarity, number> = {
 const DIRECTOR_POOL_SIZE = 16;
 
 export function endSeason(universe: Universe): void {
-  const rng = makeRng(universe.seed + universe.currentYear * 7919);
+  const completedYear = universe.currentYear;
+  const rng = makeRng(universe.seed + completedYear * 7919);
 
   // 1) Hall of Fame.
   saveHallOfFame(universe);
@@ -146,15 +147,21 @@ export function endSeason(universe: Universe): void {
     target.riderIds.push(id);
   }
 
-  // 8) Generate rookies for teams still under 10.
-  // Nordkraft ("Dynasty Builders") gets a rarity boost on rolls.
-  const newYear = universe.currentYear + 1;
-  for (const team of Object.values(universe.teams)) {
+  // 8) Generate rookies for teams still under 10. Elite rarity is assigned
+  // only here, at birth, to replace retired elite riders. Existing riders are
+  // never promoted, demoted, or re-rolled.
+  const newYear = completedYear + 1;
+  const eliteRookieQueue = buildEliteRookieQueue(rng, Object.values(universe.riders));
+  const rookieTeams = shuffle(rng, Object.values(universe.teams));
+  for (const team of rookieTeams) {
     const rarityBoost = team.bonus.kind === 'youth' ? team.bonus.amount : 0;
     const homeBias = [team.nationality];
     while (team.riderIds.length < 10) {
+      const forcedRarity = eliteRookieQueue.shift();
       const rookie = generateRider(rng, newYear, {
         forcedAge: 20,
+        forcedRarity,
+        allowEliteRoll: false,
         homeBiasNations: homeBias,
         rarityBoost,
       });
@@ -179,11 +186,23 @@ export function endSeason(universe: Universe): void {
   for (const rider of Object.values(universe.riders)) {
     if (rider.retired) continue;
     rider.phase = computePhase(rider.age, rider.careerStartYear, rider.careerLength, newYear);
-    rider.seasonForm = randFloat(rng, 0.95, 1.05);
+
+    if (rider.careerStartYear < newYear) {
+      const seasonStats = rider.history.find((h) => h.year === completedYear);
+      const wins = seasonStats?.raceWins ?? 0;
+      const points = seasonStats?.points ?? 0;
+      const successSignal = clamp(wins * 0.0015 + Math.max(0, points - 250) / 100000, 0, 0.007);
+      const quietSignal = points < 40 && wins === 0 ? -0.004 : 0;
+      const retainedMomentum = ((rider.careerMomentum ?? 1) - 1) * 0.55;
+      rider.careerMomentum = clamp(
+        1 + retainedMomentum + successSignal + quietSignal + gaussian(rng) * 0.006,
+        0.98,
+        1.02,
+      );
+      rider.seasonForm = randFloat(rng, 0.95, 1.05);
+    }
     rider.stamina = 100;
   }
-
-  rebalanceElitePopulation(rng, Object.values(universe.riders), true);
 
   // Bump director years-active for everyone still employed.
   for (const dir of Object.values(universe.directors)) {

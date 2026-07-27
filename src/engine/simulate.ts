@@ -59,10 +59,11 @@ export function getEffectiveSkill(
   const phaseMul = phaseMultiplier(rider, currentYear);
   const directorBoost = director?.boosts[skill] ?? 0;
   const form = rider.seasonForm ?? 1;
+  const momentum = rider.careerMomentum ?? 1;
   const stamina = rider.stamina ?? 100;
-  // Below 70 stamina performance starts fading; at 30 it is roughly a 9% hit.
-  const staminaMul = stamina >= 85 ? 1 : 1 - ((85 - stamina) / 40) * 0.10;
-  return base * phaseMul * form * staminaMul * (1 + directorBoost);
+  // Below 85 stamina performance begins fading; at 30 it is roughly a 14% hit.
+  const staminaMul = stamina >= 85 ? 1 : 1 - ((85 - stamina) / 55) * 0.14;
+  return base * phaseMul * form * momentum * staminaMul * (1 + directorBoost);
 }
 
 // Compute the team's identity bonus multiplier for a given stage and event.
@@ -123,44 +124,76 @@ function scoreRiderForStage(
 function archetypeStageAdjustment(arch: Archetype, stageType: StageType): number {
   switch (arch) {
     case 'sprinter':
-      // Sprinter saves legs on climbing days; contests the line on flats.
       if (stageType === 'mountain-hard') return -8;
       if (stageType === 'mountain') return -5;
       if (stageType === 'hilly') return -1;
-      if (stageType === 'flat') return +3;
+      if (stageType === 'flat') return +5;
       if (stageType === 'itt') return -3;
       return 0;
     case 'climber':
-      // Climbers gain a small lift in mountains, lose a touch on sprints.
-      if (stageType === 'mountain-hard') return +3;
-      if (stageType === 'mountain') return +2;
+      if (stageType === 'mountain-hard') return +6;
+      if (stageType === 'mountain') return +4;
       if (stageType === 'flat') return -2;
       if (stageType === 'cobbles') return -2;
       return 0;
-    case 'gc':
-      // GC contenders are everywhere but never the absolute fastest.
-      // Slight lift on mountain-hard (their podium-defining days), neutral elsewhere.
-      if (stageType === 'mountain-hard') return +2;
-      if (stageType === 'itt') return +1;
-      return 0;
     case 'rouleur':
-      if (stageType === 'itt') return +3;
-      if (stageType === 'cobbles') return +2;
+      if (stageType === 'itt') return +4;
+      if (stageType === 'cobbles') return +6;
       if (stageType === 'mountain-hard') return -3;
       return 0;
     case 'puncheur':
-      if (stageType === 'hilly') return +3;
+      if (stageType === 'hilly') return +6;
       if (stageType === 'mountain-hard') return -2;
       if (stageType === 'flat') return -1;
-      return 0;
-    case 'classics':
-      if (stageType === 'cobbles') return +3;
-      if (stageType === 'hilly') return +1;
-      if (stageType === 'mountain-hard') return -3;
       return 0;
     case 'allrounder':
       return 0;
   }
+}
+
+/**
+ * Race-duration specialty is independent from terrain profile. The bonus is
+ * large in one-day races, but deliberately concentrated on GC-relevant stages
+ * in stage races so a classics specialist can still win an isolated stage.
+ */
+export function raceSpecialtyStageAdjustment(
+  rider: Rider,
+  category: CalendarEvent['category'],
+  stageType: StageType,
+): number {
+  const isOneDay = category === 'classic' || category === 'monument';
+  let adjustment = 0;
+
+  if (isOneDay && rider.raceSpecialty === 'classics') adjustment += 8.0;
+  if (category === 'week-stage' && rider.raceSpecialty === 'week-stage') {
+    adjustment += ['mountain', 'mountain-hard', 'itt', 'ttt'].includes(stageType) ? 4.2 : 0.9;
+  }
+  if (category === 'grand-tour' && rider.raceSpecialty === 'grand-tour') {
+    adjustment += ['mountain', 'mountain-hard', 'itt', 'ttt'].includes(stageType) ? 5.3 : 1.2;
+  }
+
+  // In one-day races, terrain profile is the stronger of the two dimensions.
+  // A non-rouleur can win Roubaix, but a rouleur should usually be favored.
+  if (isOneDay) {
+    const terrainMatch =
+      (stageType === 'cobbles' && rider.archetype === 'rouleur') ||
+      (stageType === 'hilly' && rider.archetype === 'puncheur') ||
+      ((stageType === 'mountain' || stageType === 'mountain-hard') && rider.archetype === 'climber') ||
+      (stageType === 'flat' && rider.archetype === 'sprinter');
+    if (terrainMatch) adjustment += stageType === 'cobbles' ? 9.0 : 6.0;
+  }
+
+  // The Indurain/Pogačar profile: a balanced rider becomes a true GC force
+  // only when that balanced terrain profile is paired with the matching
+  // stage-race specialty.
+  if (rider.archetype === 'allrounder' && category === 'week-stage' && rider.raceSpecialty === 'week-stage') {
+    adjustment += ['mountain', 'mountain-hard', 'itt', 'ttt'].includes(stageType) ? 1.7 : 0.4;
+  }
+  if (rider.archetype === 'allrounder' && category === 'grand-tour' && rider.raceSpecialty === 'grand-tour') {
+    adjustment += ['mountain', 'mountain-hard', 'itt', 'ttt'].includes(stageType) ? 2.4 : 0.55;
+  }
+
+  return adjustment;
 }
 
 
@@ -226,15 +259,7 @@ export function simulateStage(input: SimulateStageInput): StageResult {
     // sprinter can have decent climbing skill (78) but they save legs on
     // mountain stages and lose time; a climber doesn't contest bunch sprints.
     rawScore += archetypeStageAdjustment(rider.archetype, stage.type);
-
-    // Three-week GC rewards complete riders. Pure climbers can still dominate
-    // mountain-heavy editions, but GC specialists and all-rounders lose less
-    // time across the full mix of terrain.
-    if (isGT) {
-      if (rider.archetype === 'gc') rawScore += 2.0;
-      else if (rider.archetype === 'allrounder') rawScore += 1.5;
-      else if (rider.archetype === 'climber' && stage.type !== 'mountain' && stage.type !== 'mountain-hard') rawScore -= 1.5;
-    }
+    rawScore += raceSpecialtyStageAdjustment(rider, raceCategory, stage.type);
 
     // Random variance — wider for low-consistency riders.
     const variance = (100 - rider.consistency) * 0.28 + 5;
@@ -243,7 +268,8 @@ export function simulateStage(input: SimulateStageInput): StageResult {
     // Grand Tour fatigue: rider with low endurance fades in week 3.
     if (isGT) {
       const enduranceFactor = (rider.skills.endurance - 70) / 30;
-      const fatigueLoss = (1 - enduranceFactor) * fatigueProgress * 5.5;
+      const specialtyRelief = rider.raceSpecialty === 'grand-tour' ? 0.66 : 1;
+      const fatigueLoss = (1 - enduranceFactor) * fatigueProgress * 5.5 * specialtyRelief;
       rawScore -= fatigueLoss;
     }
 
@@ -330,8 +356,12 @@ function simulateTTT(input: SimulateStageInput): StageResult {
     const directorTTBoost = director?.boosts.timeTrial ?? 0;
     let score = avgTT * 0.6 + avgEnd * 0.2 + captainBoost * 25 + directorTTBoost * 50;
 
-    // Team identity bonus on TTT.
+    // Team identity bonus and the squad's race-duration suitability on TTT.
     score *= teamBonusMultiplier(team, 'ttt', eventId, raceCategory);
+    score += riders.reduce(
+      (sum, rider) => sum + raceSpecialtyStageAdjustment(rider, raceCategory, 'ttt'),
+      0,
+    ) / riders.length;
 
     score += gaussian(rng) * 3;
     teamScores.push({ teamId, score, riders });
@@ -434,7 +464,6 @@ export function buildClassifications(
   function mountainMultFor(arch: Archetype): number {
     if (arch === 'climber') return 1.3;
     if (arch === 'puncheur') return 1.1;
-    if (arch === 'gc') return 1.05;
     // sprinter/rouleur/classics get base — they barely score here anyway
     return 1.0;
   }

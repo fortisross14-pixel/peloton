@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { Universe } from '../types';
+import { SKILL_KEYS, type Universe, type Archetype, type RaceSpecialty } from '../types';
 import { generateUniverse } from '../data/generators';
 import {
   startRace,
@@ -28,7 +28,7 @@ export interface SaveSlotSummary {
 }
 
 interface StoredGame {
-  version: 7;
+  version: 8;
   savedAt: number;
   universe: Universe;
 }
@@ -84,7 +84,7 @@ function migratePreviousSave() {
     const raw = localStorage.getItem(PREVIOUS_STORAGE_KEY);
     if (!raw) return;
     const universe = JSON.parse(raw) as Universe;
-    const stored: StoredGame = { version: 7, savedAt: Date.now(), universe };
+    const stored: StoredGame = { version: 8, savedAt: Date.now(), universe };
     localStorage.setItem(slotKey(1), JSON.stringify(stored));
     localStorage.removeItem(PREVIOUS_STORAGE_KEY);
   } catch (e) {
@@ -94,7 +94,7 @@ function migratePreviousSave() {
 
 function persist(slot: SaveSlot, universe: Universe) {
   try {
-    const stored: StoredGame = { version: 7, savedAt: Date.now(), universe };
+    const stored: StoredGame = { version: 8, savedAt: Date.now(), universe };
     localStorage.setItem(slotKey(slot), JSON.stringify(stored));
   } catch (e) {
     console.warn('persist failed', e);
@@ -104,7 +104,47 @@ function persist(slot: SaveSlot, universe: Universe) {
 function parseStoredGame(raw: string): StoredGame {
   const parsed = JSON.parse(raw) as StoredGame | Universe;
   if ('universe' in parsed && 'savedAt' in parsed) return parsed;
-  return { version: 7, savedAt: Date.now(), universe: parsed };
+  return { version: 8, savedAt: Date.now(), universe: parsed };
+}
+
+function stableUnit(text: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < text.length; i++) {
+    h ^= text.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return (h >>> 0) / 0xffffffff;
+}
+
+function normalizeUniverse(universe: Universe): void {
+  const validArchetypes = new Set<Archetype>(['climber', 'sprinter', 'rouleur', 'puncheur', 'allrounder']);
+  const validRaceSpecialties = new Set<RaceSpecialty>(['classics', 'week-stage', 'grand-tour']);
+
+  for (const rider of Object.values(universe.riders)) {
+    const legacyArchetype = rider.archetype as string;
+    if (!validArchetypes.has(legacyArchetype as Archetype)) {
+      if (legacyArchetype === 'gc') rider.archetype = 'allrounder';
+      else if (legacyArchetype === 'classics') {
+        rider.archetype = rider.skills.cobbles >= rider.skills.climbing ? 'rouleur' : 'puncheur';
+      } else rider.archetype = 'allrounder';
+    }
+
+    if (!validRaceSpecialties.has(rider.raceSpecialty as RaceSpecialty)) {
+      if (legacyArchetype === 'gc') rider.raceSpecialty = 'grand-tour';
+      else if (legacyArchetype === 'classics') rider.raceSpecialty = 'classics';
+      else {
+        const roll = stableUnit(`${rider.id}:race-specialty`);
+        rider.raceSpecialty = roll < 0.36 ? 'classics' : roll < 0.65 ? 'week-stage' : 'grand-tour';
+      }
+    }
+
+    if (!Number.isFinite(rider.baseOverall)) {
+      rider.baseOverall = SKILL_KEYS.reduce((sum, key) => sum + rider.skills[key], 0) / SKILL_KEYS.length;
+    }
+    if (!Number.isFinite(rider.seasonForm)) rider.seasonForm = 1;
+    if (!Number.isFinite(rider.careerMomentum)) rider.careerMomentum = 1;
+    if (!Number.isFinite(rider.stamina)) rider.stamina = 100;
+  }
 }
 
 function isCompatibleUniverse(universe: Universe): boolean {
@@ -141,11 +181,13 @@ export const useGame = create<GameStore>((set, get) => ({
       const raw = localStorage.getItem(slotKey(slot));
       if (!raw) return false;
       const { universe } = parseStoredGame(raw);
+      normalizeUniverse(universe);
       if (!isCompatibleUniverse(universe)) {
         console.warn(`Save slot ${slot} has an incompatible schema — discarding it.`);
         localStorage.removeItem(slotKey(slot));
         return false;
       }
+      persist(slot, universe);
       set({ universe, activeSlot: slot, view: 'calendar', selectedRiderId: null, selectedTeamId: null });
       return true;
     } catch (e) {

@@ -5,17 +5,18 @@
 export type Rarity = 'generational' | 'legend' | 'epic' | 'rare' | 'uncommon' | 'common';
 
 /**
- * Rider archetype — drives skill profile at generation, awards bonuses
- * during racing, and determines who wins which classification.
+ * Terrain profile — the rider's physical/technical identity. This is kept
+ * separate from race-duration specialty so a rouleur can be a classics,
+ * one-week, or Grand Tour specialist.
  */
 export type Archetype =
   | 'climber'         // mountain stages, KOM jersey
   | 'sprinter'        // flat stages, Points jersey
-  | 'gc'              // Grand Tour overall contender
-  | 'rouleur'         // ITT specialist, cobbled classics
-  | 'puncheur'        // hilly classics (Liège, Amstel, Flèche)
-  | 'classics'        // monuments (Flanders, Roubaix)
-  | 'allrounder';     // versatile, no peak skill
+  | 'rouleur'         // ITT specialist and strong on cobbles
+  | 'puncheur'        // punchy on short climbs and hilly finishes
+  | 'allrounder';     // balanced across terrain
+
+export type RaceSpecialty = 'classics' | 'week-stage' | 'grand-tour';
 
 export const RARITY_ORDER: Rarity[] = ['generational', 'legend', 'epic', 'rare', 'uncommon', 'common'];
 
@@ -30,33 +31,45 @@ export const RARITY_WEIGHTS: Record<Rarity, number> = {
 };
 
 export const ARCHETYPE_WEIGHTS: Record<Archetype, number> = {
-  climber: 0.18,
-  sprinter: 0.18,
-  gc: 0.12,
-  rouleur: 0.10,
-  puncheur: 0.12,
-  classics: 0.10,
-  allrounder: 0.20,
+  climber: 0.22,
+  sprinter: 0.19,
+  rouleur: 0.18,
+  puncheur: 0.18,
+  allrounder: 0.23,
+};
+
+export const RACE_SPECIALTY_WEIGHTS: Record<RaceSpecialty, number> = {
+  classics: 0.36,
+  'week-stage': 0.29,
+  'grand-tour': 0.35,
 };
 
 export const ARCHETYPE_LABELS: Record<Archetype, string> = {
   climber: 'Climber',
   sprinter: 'Sprinter',
-  gc: 'GC Contender',
   rouleur: 'Rouleur',
   puncheur: 'Puncheur',
-  classics: 'Classics Hunter',
   allrounder: 'All-rounder',
 };
 
 export const ARCHETYPE_TAGLINES: Record<Archetype, string> = {
-  climber: 'Lives in the mountains, contests KOM jerseys.',
-  sprinter: 'Bunch-sprint specialist, contests Points jerseys.',
-  gc: 'Built for Grand Tour overall classifications.',
-  rouleur: 'Time trial specialist, also strong on the cobbles.',
-  puncheur: 'Punchy on short steep climbs, hilly classics.',
-  classics: 'Cobbled monuments and tough one-day races.',
-  allrounder: 'Versatile rider, no single peak skill.',
+  climber: 'Lives in the mountains and contests KOM jerseys.',
+  sprinter: 'Explosive in bunch finishes and flat stages.',
+  rouleur: 'Powerful against the clock and over the cobbles.',
+  puncheur: 'Punchy on short climbs and hilly finishes.',
+  allrounder: 'Versatile across terrain without one narrow weakness.',
+};
+
+export const RACE_SPECIALTY_LABELS: Record<RaceSpecialty, string> = {
+  classics: 'Classics Specialist',
+  'week-stage': 'One-week Specialist',
+  'grand-tour': 'Grand Tour Specialist',
+};
+
+export const RACE_SPECIALTY_TAGLINES: Record<RaceSpecialty, string> = {
+  classics: 'Peaks for one-day races and monuments.',
+  'week-stage': 'Excels over compact multi-day stage races.',
+  'grand-tour': 'Built to sustain GC form across three weeks.',
 };
 
 // ============================================================================
@@ -105,6 +118,9 @@ export interface RiderSeasonStats {
   age: number;
   teamId: string;
   phase: CareerPhase;
+  seasonForm?: number;
+  careerMomentum?: number;
+  annualOverall?: number;
   points: number;
   stageWins: number;
   raceWins: number;
@@ -127,11 +143,14 @@ export interface Rider {
   id: string;
   name: string;
   nationality: string;
-  rarity: Rarity;
-  archetype: Archetype;
-  skills: Skills;          // base skills, 1-100
-  seasonForm: number;      // annual multiplier, normally 0.95-1.05
-  stamina: number;         // 0-100; depleted by stage races, recovers between events
+  rarity: Rarity;            // immutable for the full career
+  archetype: Archetype;      // immutable terrain profile
+  raceSpecialty: RaceSpecialty; // immutable race-duration specialty
+  skills: Skills;            // immutable base skills, 1-100
+  baseOverall: number;       // immutable average of base skills
+  seasonForm: number;        // annual shape multiplier, 0.95-1.05
+  careerMomentum: number;    // slower-moving performance multiplier, 0.98-1.02
+  stamina: number;           // 0-100; depleted by racing, recovers between events
   leadership: number;      // 1-99, independent from rarity
   consistency: number;     // 1-99, variance reducer
   // Career

@@ -20,41 +20,62 @@ import { phaseMultiplier } from '../data/generators';
 
 function specialtyScore(rider: Rider, event: CalendarEvent, currentYear: number): number {
   const phaseMul = phaseMultiplier(rider, currentYear);
-  if (phaseMul === 0) return -Infinity; // retired
+  if (phaseMul === 0) return -Infinity;
 
   const form = rider.seasonForm ?? 1;
+  const momentum = rider.careerMomentum ?? 1;
   const stamina = rider.stamina ?? 100;
   const readiness = stamina >= 85 ? 1 : Math.max(0.80, 1 - (85 - stamina) * 0.0045);
-  const s = Object.fromEntries(Object.entries(rider.skills).map(([k, v]) => [k, v * form * readiness])) as Rider['skills'];
+  const performanceMul = phaseMul * form * momentum * readiness;
+  const s = Object.fromEntries(
+    Object.entries(rider.skills).map(([k, v]) => [k, v * performanceMul]),
+  ) as Rider['skills'];
+
+  let terrainScore: number;
   switch (event.id) {
     case 'tour':
     case 'giro':
     case 'vuelta':
-      // Mixed: GC riders want climbing + ITT + endurance, sprinters want sprinting
-      return Math.max(
+      terrainScore = Math.max(
         s.climbing * 0.5 + s.timeTrial * 0.2 + s.endurance * 0.3,
         s.sprinting * 0.6 + s.endurance * 0.2 + s.cobbles * 0.1,
         s.breakaway * 0.5 + s.climbing * 0.3 + s.endurance * 0.2,
       );
+      break;
     case 'flanders':
     case 'roubaix':
     case 'strade':
-      return s.cobbles * 0.7 + s.endurance * 0.2 + s.sprinting * 0.1;
+      terrainScore = s.cobbles * 0.7 + s.endurance * 0.2 + s.sprinting * 0.1;
+      break;
     case 'milan-sanremo':
-      return s.sprinting * 0.5 + s.endurance * 0.3 + s.climbing * 0.2;
+      terrainScore = s.sprinting * 0.5 + s.endurance * 0.3 + s.climbing * 0.2;
+      break;
     case 'liege':
     case 'amstel':
     case 'fleche':
     case 'san-sebastian':
-      return s.climbing * 0.4 + s.breakaway * 0.3 + s.endurance * 0.3;
+      terrainScore = s.climbing * 0.4 + s.breakaway * 0.3 + s.endurance * 0.3;
+      break;
     case 'lombardia':
-      return s.climbing * 0.6 + s.endurance * 0.3 + s.descending * 0.1;
+      terrainScore = s.climbing * 0.6 + s.endurance * 0.3 + s.descending * 0.1;
+      break;
     case 'worlds':
-      return s.climbing * 0.3 + s.endurance * 0.3 + s.breakaway * 0.2 + s.sprinting * 0.2;
+      terrainScore = s.climbing * 0.3 + s.endurance * 0.3 + s.breakaway * 0.2 + s.sprinting * 0.2;
+      break;
     default:
-      // week-stage races: similar to GT but smaller
-      return s.climbing * 0.4 + s.timeTrial * 0.2 + s.endurance * 0.2 + s.sprinting * 0.2;
+      terrainScore = s.climbing * 0.4 + s.timeTrial * 0.2 + s.endurance * 0.2 + s.sprinting * 0.2;
+      break;
   }
+
+  const durationBonus =
+    (event.category === 'classic' || event.category === 'monument') && rider.raceSpecialty === 'classics'
+      ? 8
+      : event.category === 'week-stage' && rider.raceSpecialty === 'week-stage'
+        ? 7
+        : event.category === 'grand-tour' && rider.raceSpecialty === 'grand-tour'
+          ? 8
+          : 0;
+  return terrainScore + durationBonus;
 }
 
 // Track Grand Tour participation across the season so every rider does at least one.
@@ -407,7 +428,16 @@ function finishRace(universe: Universe): void {
     const endurance = rider.skills.endurance;
     const baseCost = event.category === 'grand-tour' ? 54 : event.category === 'week-stage' ? 24 : 9;
     const enduranceRelief = (endurance - 70) * (event.category === 'grand-tour' ? 0.35 : 0.18);
-    rider.stamina = Math.max(0, (rider.stamina ?? 100) - Math.max(5, baseCost - enduranceRelief));
+    const specialtyRelief =
+      event.category === 'grand-tour' && rider.raceSpecialty === 'grand-tour'
+        ? 0.92
+        : event.category === 'week-stage' && rider.raceSpecialty === 'week-stage'
+          ? 0.86
+          : (event.category === 'classic' || event.category === 'monument') && rider.raceSpecialty === 'classics'
+            ? 0.82
+            : 1;
+    const raceCost = Math.max(5, baseCost - enduranceRelief) * specialtyRelief;
+    rider.stamina = Math.max(0, (rider.stamina ?? 100) - raceCost);
   }
 
   // Update each rider's season history (lightweight — only the GC finisher rows
@@ -423,6 +453,9 @@ function finishRace(universe: Universe): void {
         age: rider.age,
         teamId: rider.teamId,
         phase: rider.phase,
+        seasonForm: rider.seasonForm ?? 1,
+        careerMomentum: rider.careerMomentum ?? 1,
+        annualOverall: (rider.baseOverall ?? 0) * phaseMultiplier(rider, universe.currentYear) * (rider.seasonForm ?? 1),
         points: 0,
         stageWins: 0,
         raceWins: 0,

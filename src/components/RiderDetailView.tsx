@@ -1,8 +1,9 @@
 import { useGame } from '../state/store';
-import { SKILL_KEYS, SKILL_LABELS, ARCHETYPE_LABELS, ARCHETYPE_TAGLINES } from '../types';
+import { SKILL_KEYS, SKILL_LABELS, ARCHETYPE_LABELS, ARCHETYPE_TAGLINES, RACE_SPECIALTY_LABELS, RACE_SPECIALTY_TAGLINES } from '../types';
 import { Flag } from '../utils/flags';
 import { eventName, terrainLabel } from '../utils/eventNames';
 import type { Rider } from '../types';
+import { annualOverall, baseOverall, currentPerformanceOverall } from '../engine/riderRatings';
 
 export function RiderDetailView() {
   const universe = useGame((s) => s.universe);
@@ -22,7 +23,7 @@ export function RiderDetailView() {
   return (
     <div className="pt-8">
       <button
-        onClick={() => setView('teams')}
+        onClick={() => setView('riders')}
         className="text-sm font-body opacity-60 hover:opacity-100 mb-4"
       >
         ← Back
@@ -52,10 +53,10 @@ export function RiderDetailView() {
               {rider.rarity}
             </div>
             <div className="font-display text-lg font-bold">
-              {ARCHETYPE_LABELS[rider.archetype]}
+              {ARCHETYPE_LABELS[rider.archetype]} · {RACE_SPECIALTY_LABELS[rider.raceSpecialty]}
             </div>
-            <div className="font-body italic text-xs opacity-60 mt-0.5">
-              {ARCHETYPE_TAGLINES[rider.archetype]}
+            <div className="font-body italic text-xs opacity-60 mt-0.5 max-w-md">
+              {ARCHETYPE_TAGLINES[rider.archetype]} {RACE_SPECIALTY_TAGLINES[rider.raceSpecialty]}
             </div>
             <div className="font-mono text-xs opacity-60 mt-1">
               Age {rider.age} · {rider.phase} · Year {Math.max(0, yearsIn) + 1}/{rider.careerLength}
@@ -95,6 +96,12 @@ export function RiderDetailView() {
             <div className="font-display font-bold text-lg mb-3">Current Season</div>
             <dl className="space-y-2 text-sm">
               <Row label="Season points" value={pts.toString()} />
+              <Row label="Base rating" value={baseOverall(rider).toFixed(1)} />
+              <Row label="Annual rating" value={annualOverall(rider, universe.currentYear).toFixed(1)} />
+              <Row label="Current performance" value={currentPerformanceOverall(rider, universe.currentYear).toFixed(1)} />
+              <Row label="Annual shape" value={formatDelta(rider.seasonForm ?? 1)} />
+              <Row label="Career momentum" value={formatDelta(rider.careerMomentum ?? 1)} />
+              <Row label="Stamina" value={`${Math.round(rider.stamina ?? 100)}/100`} />
               <Row label="Career phase" value={rider.phase} capitalize />
               <Row
                 label="Years remaining"
@@ -209,6 +216,11 @@ export function RiderDetailView() {
       )}
     </div>
   );
+}
+
+function formatDelta(multiplier: number): string {
+  const pct = (multiplier - 1) * 100;
+  return `${pct >= 0 ? '+' : ''}${pct.toFixed(1)}%`;
 }
 
 function labelGT(id: string): string {

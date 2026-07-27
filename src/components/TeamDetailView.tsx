@@ -1,5 +1,5 @@
 import { useGame } from '../state/store';
-import { SKILL_KEYS, SKILL_LABELS, ARCHETYPE_LABELS } from '../types';
+import { SKILL_KEYS, SKILL_LABELS, ARCHETYPE_LABELS, RACE_SPECIALTY_LABELS } from '../types';
 import { eventName, terrainLabel } from '../utils/eventNames';
 import type { Rider } from '../types';
 
@@ -139,7 +139,8 @@ export function TeamDetailView() {
                 <th className="text-left p-2.5 font-sans text-xs tracking-widest opacity-60">RIDER</th>
                 <th className="text-left p-2.5 font-sans text-xs tracking-widest opacity-60">NAT</th>
                 <th className="text-left p-2.5 font-sans text-xs tracking-widest opacity-60">RARITY</th>
-                <th className="text-left p-2.5 font-sans text-xs tracking-widest opacity-60">ROLE</th>
+                <th className="text-left p-2.5 font-sans text-xs tracking-widest opacity-60">TERRAIN</th>
+                <th className="text-left p-2.5 font-sans text-xs tracking-widest opacity-60">SPECIALTY</th>
                 <th className="text-right p-2.5 font-sans text-xs tracking-widest opacity-60">AGE</th>
                 <th className="text-right p-2.5 font-sans text-xs tracking-widest opacity-60">PHASE</th>
                 <th className="text-right p-2.5 font-sans text-xs tracking-widest opacity-60">LDR</th>
@@ -167,6 +168,9 @@ export function TeamDetailView() {
                       </td>
                       <td className="p-2.5 font-body text-xs">
                         {ARCHETYPE_LABELS[r.archetype]}
+                      </td>
+                      <td className="p-2.5 font-body text-xs whitespace-nowrap">
+                        {RACE_SPECIALTY_LABELS[r.raceSpecialty]}
                       </td>
                       <td className="p-2.5 text-right font-mono">{r.age}</td>
                       <td className="p-2.5 text-right font-mono text-xs opacity-70 capitalize">
